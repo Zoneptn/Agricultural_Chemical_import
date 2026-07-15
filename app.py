@@ -74,28 +74,32 @@ st.write(
 # ==================================================
 st.sidebar.header("Search")
 
+
+# Chemical
 chemical = st.sidebar.selectbox(
     "Chemical",
     sorted(df["Common_Name"].dropna().unique())
 )
 
-formula = st.sidebar.selectbox(
-    "Formula Type",
-    sorted(
-        df.loc[
-            df["Common_Name"] == chemical,
-            "Formula_Type"
-        ].dropna().unique()
-    )
-)
-
+# Concentration (filtered by chemical)
 concentration = st.sidebar.selectbox(
     "Concentration",
     sorted(
         df.loc[
-            (df["Common_Name"] == chemical) &
-            (df["Formula_Type"] == formula),
+            df["Common_Name"] == chemical,
             "Concentration"
+        ].dropna().unique()
+    )
+)
+
+# Formula Type (filtered by chemical + concentration)
+formula = st.sidebar.selectbox(
+    "Formula Type",
+    sorted(
+        df.loc[
+            (df["Common_Name"] == chemical) &
+            (df["Concentration"] == concentration),
+            "Formula_Type"
         ].dropna().unique()
     )
 )
