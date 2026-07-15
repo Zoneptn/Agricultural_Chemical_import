@@ -444,18 +444,18 @@ st.divider()
 st.header("🏆 Top Chemicals by Type")
 
 type_mapping = {
-    "her": "Herbicide",
-    "fun": "Fungicide",
-    "ins": "Insecticide",
-    "pgr": "Plant Growth Regulator",
-    "fum": "Fumigant",
-    "acr": "Acaricide",
-    "bio": "Biopesticide",
-    "rod": "Rodenticide",
-    "nem": "Nematicide",
+    "HER": "Herbicide",
+    "FUN": "Fungicide",
+    "INS": "Insecticide",
+    "PGR": "Plant Growth Regulator",
+    "FUM": "Fumigant",
+    "ACR": "Acaricide",
+    "BIO": "Biopesticide",
+    "ROD": "Rodenticide",
+    "NEM": "Nematicide",
     "mol": "Molluscicide",
     "synergist": "Synergist",
-    "other": "Other"
+    "OTHER": "Other"
 }
 
 # -------------------------------------
