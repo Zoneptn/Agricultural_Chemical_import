@@ -361,8 +361,8 @@ if active_products.empty:
     st.info("No active registered products found for this chemical.")
 else:
     display_cols = [
-        "commercial_name",
         "registration_number",
+        "commercial_name",
         "distributor",
         "origin",
         "expiry_date"
