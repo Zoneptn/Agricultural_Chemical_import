@@ -369,10 +369,16 @@ else:
     ]
 
     st.dataframe(
-        active_products[display_cols],
-        hide_index=True,
-        use_container_width=True
-    )
+    active_products[display_cols],
+    hide_index=True,
+    use_container_width=True,
+    column_config={
+        "expiry_date": st.column_config.DateColumn(
+            "Expiry Date",
+            format="YYYY-MM-DD"
+        )
+    }
+)
 
 
 
