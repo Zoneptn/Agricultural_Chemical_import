@@ -23,27 +23,28 @@ if st.button("🔄 Reload Latest Data"):
 # ==================================================
 @st.cache_data
 def load_data():
+
     import_df = pd.read_excel("chemical_import_2025.xlsx")
     reg_df = pd.read_excel("chemical_registration.xlsx")
 
     # Automatically detect year columns
-    year_columns = [c for c in df.columns if isinstance(c, int)]
+    year_columns = [c for c in import_df.columns if isinstance(c, int)]
 
     # Convert year columns to numeric
     for col in year_columns:
-        df[col] = (
-            df[col]
+        import_df[col] = (
+            import_df[col]
             .astype(str)
             .str.replace(",", "", regex=False)
             .str.strip()
         )
 
-        df[col] = pd.to_numeric(df[col], errors="coerce")
+        import_df[col] = pd.to_numeric(import_df[col], errors="coerce")
 
-    return df
+    return import_df, reg_df
 
 
-df,reg_df = load_data()
+df, reg_df = load_data()
 
 # standarddize the column
 reg_df["common_name"] = (
