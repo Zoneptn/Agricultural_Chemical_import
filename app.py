@@ -44,15 +44,23 @@ def load_data():
     return import_df, reg_df
 
 
+
 df, reg_df = load_data()
 
+# ==========================================
+# Cleaning Functions
+# ==========================================
+import re
+
+def clean_common_name(x):
+    x = str(x).upper()
+    x = re.sub(r"\s+", " ", x)       # normalize whitespace
+    x = re.sub(r"\s*\+\s*", "+", x)  # remove spaces around +
+    x = re.sub(r"\s*-\s*", "-", x)   # remove spaces around -
+    return x.strip()
+
 # standarddize the column
-reg_df["common_name"] = (
-    reg_df["common_name"]
-    .astype(str)
-    .str.upper()
-    .str.strip()
-)
+reg_df["common_name"] = reg_df["common_name"].apply(clean_common_name)
 
 reg_df["formula_type"] = (
     reg_df["formula_type"]
@@ -67,12 +75,7 @@ reg_df["concentration"] = (
     .str.strip()
 )
 
-df["Common_Name"] = (
-    df["Common_Name"]
-    .astype(str)
-    .str.upper()
-    .str.strip()
-)
+df["Common_Name"] = df["Common_Name"].apply(clean_common_name)
 
 df["Formula_Type"] = (
     df["Formula_Type"]
