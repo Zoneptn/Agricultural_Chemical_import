@@ -378,7 +378,7 @@ else:
     column_config={
         "expiry_date": st.column_config.DateColumn(
             "Expiry Date",
-            format="YYYY-MM-DD"
+            format="DD-MM-YYYY"
         )
     }
 )
