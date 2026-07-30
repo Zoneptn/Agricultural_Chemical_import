@@ -368,7 +368,7 @@ else:
         "commercial_name",
         "distributor",
         "origin",
-        "applicant"
+        "applicant",
         "expiry_date"
     ]
 
