@@ -384,7 +384,130 @@ else:
     }
 )
 
+# ==================================================
+# Chemical Comparison
+# ==================================================
+st.divider()
+st.header("📈 Chemical Comparison")
 
+st.write(
+    "Compare import volumes for up to 10 chemical products."
+)
+
+# ----------------------------------------
+# Number of chemicals
+# ----------------------------------------
+num_compare = st.slider(
+    "Number of Chemicals to Compare",
+    min_value=2,
+    max_value=10,
+    value=2
+)
+
+compare_data = []
+
+# ----------------------------------------
+# Selection boxes
+# ----------------------------------------
+for i in range(num_compare):
+
+    st.subheader(f"Chemical {i+1}")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        chemical_i = st.selectbox(
+            "Common Name",
+            sorted(df["Common_Name"].dropna().unique()),
+            key=f"chemical_{i}"
+        )
+
+    with col2:
+        concentration_i = st.selectbox(
+            "Concentration",
+            sorted(
+                df.loc[
+                    df["Common_Name"] == chemical_i,
+                    "Concentration"
+                ].dropna().unique()
+            ),
+            key=f"conc_{i}"
+        )
+
+    with col3:
+        formula_i = st.selectbox(
+            "Formula Type",
+            sorted(
+                df.loc[
+                    (df["Common_Name"] == chemical_i) &
+                    (df["Concentration"] == concentration_i),
+                    "Formula_Type"
+                ].dropna().unique()
+            ),
+            key=f"formula_{i}"
+        )
+
+    # ----------------------------------------
+    # Filter
+    # ----------------------------------------
+    temp = df[
+        (df["Common_Name"] == chemical_i) &
+        (df["Concentration"] == concentration_i) &
+        (df["Formula_Type"] == formula_i)
+    ]
+
+    if not temp.empty:
+
+        yearly = temp[year_columns].sum()
+
+        temp_df = pd.DataFrame({
+            "Year": year_columns,
+            "Volume": yearly.values
+        })
+
+        temp_df["Chemical"] = (
+            chemical_i +
+            " | " +
+            concentration_i +
+            " | " +
+            formula_i
+        )
+
+        compare_data.append(temp_df)
+
+# ----------------------------------------
+# Plot
+# ----------------------------------------
+if compare_data:
+
+    compare_df = pd.concat(compare_data)
+
+    fig_compare = px.line(
+        compare_df,
+        x="Year",
+        y="Volume",
+        color="Chemical",
+        markers=True,
+        template="plotly_white"
+    )
+
+    fig_compare.update_layout(
+        title="Chemical Import Comparison",
+        xaxis_title="Year",
+        yaxis_title="Import Volume",
+        hovermode="x unified",
+        legend_title="Chemical",
+        height=650
+    )
+
+    fig_compare.update_yaxes(
+        tickformat=","
+    )
+
+    st.plotly_chart(
+        fig_compare,
+        use_container_width=True
+    )
 
 
 # ==================================================
