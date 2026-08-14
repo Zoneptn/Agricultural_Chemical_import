@@ -238,23 +238,36 @@ yearly_df = pd.DataFrame({
 # Country Import by Year
 # ==================================================
 
-country_yearly_df = (
-    filtered_total
-    .groupby("Origin")[year_columns]
-    .sum()
-    .reset_index()
-)
+if selected_country == "All Countries":
 
-country_yearly_df = country_yearly_df.melt(
-    id_vars="Origin",
-    var_name="Year",
-    value_name="Volume"
-)
+    # Sum all countries together
+    chart_yearly_df = pd.DataFrame({
+        "Year": year_columns,
+        "Volume": (
+            filtered_total[year_columns]
+            .sum()
+            .fillna(0)
+            .values
+        )
+    })
 
-country_yearly_df["Volume"] = (
-    country_yearly_df["Volume"]
-    .fillna(0)
-)
+else:
+
+    # Import from selected country only
+    selected_country_data = filtered_total[
+        filtered_total["Origin"] == selected_country
+    ]
+
+    chart_yearly_df = pd.DataFrame({
+        "Year": year_columns,
+        "Volume": (
+            selected_country_data[year_columns]
+            .sum()
+            .fillna(0)
+            .values
+        )
+    })
+
 
 # ==================================================
 # Chart Data Based on Country Selection
@@ -316,54 +329,49 @@ with left:
 
         st.subheader("Yearly Import - All Countries")
 
-        st.dataframe(
-            yearly_df,
-            hide_index=True,
-            use_container_width=True,
-            column_config={
-                "Volume": st.column_config.NumberColumn(
-                    "Volume(liter/kg)",
-                    format="%,.0f"
-                )
-            }
-        )
-
     else:
 
         st.subheader(
             f"Yearly Import - {selected_country}"
         )
 
-        selected_yearly_df = (
-            chart_df[["Year", "Volume"]]
-            .copy()
-        )
-
-        st.dataframe(
-            selected_yearly_df,
-            hide_index=True,
-            use_container_width=True,
-            column_config={
-                "Volume": st.column_config.NumberColumn(
-                    "Volume(liter/kg)",
-                    format="%,.0f"
-                )
-            }
-        )
+    st.dataframe(
+        chart_yearly_df,
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "Volume": st.column_config.NumberColumn(
+                "Volume(liter/kg)",
+                format="%,.0f"
+            )
+        }
+    )
 
 # --------------------------------------------------
 # Line Chart
 # --------------------------------------------------
-
 with right:
 
+    if selected_country == "All Countries":
+
+        chart_title = (
+            f"{chemical} ({formula} - {concentration}) "
+            "— All Countries"
+        )
+
+    else:
+
+        chart_title = (
+            f"{chemical} ({formula} - {concentration}) "
+            f"— {selected_country}"
+        )
+
     fig_total = px.line(
-        chart_df,
+        chart_yearly_df,
         x="Year",
         y="Volume",
-        color="Origin",
         markers=True,
-        title=f"{chemical} ({formula} - {concentration})"
+        title=chart_title
     )
 
     fig_total.update_layout(
@@ -374,7 +382,6 @@ with right:
 
     fig_total.update_traces(
         hovertemplate=
-        "<b>Country:</b> %{fullData.name}<br>"
         "<b>Year:</b> %{x}<br>"
         "<b>Volume:</b> %{y:,.1f}<extra></extra>"
     )
