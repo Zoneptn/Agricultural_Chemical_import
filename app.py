@@ -269,19 +269,6 @@ else:
     })
 
 
-# ==================================================
-# Chart Data Based on Country Selection
-# ==================================================
-
-if selected_country == "All Countries":
-
-    chart_df = country_yearly_df.copy()
-
-else:
-
-    chart_df = country_yearly_df[
-        country_yearly_df["Origin"] == selected_country
-    ].copy()
 
 # ==================================================
 # KPI
