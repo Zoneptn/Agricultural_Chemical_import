@@ -113,6 +113,7 @@ reg_df["formula_type"] = (
 reg_df["concentration"] = (
     reg_df["concentration"]
     .astype(str)
+    .str.upper()
     .str.strip()
 )
 
@@ -128,6 +129,7 @@ df["Formula_Type"] = (
 df["Concentration"] = (
     df["Concentration"]
     .astype(str)
+    .str.upper()
     .str.strip()
 )
 
@@ -136,6 +138,22 @@ reg_df["expiry_date"] = pd.to_datetime(
     reg_df["expiry_date"],
     errors="coerce"
 )
+
+# Diagnostic: if a large share of expiry_date failed to parse, every
+# row silently falls to "EXPIRED" and Active Registered Products will
+# always be empty regardless of selection. Surface this instead of
+# failing silently.
+_unparsed_dates = reg_df["expiry_date"].isna().sum()
+_total_reg_rows = len(reg_df)
+if _total_reg_rows > 0 and (_unparsed_dates / _total_reg_rows) > 0.3:
+    st.warning(
+        f"⚠️ {_unparsed_dates} of {_total_reg_rows} rows in "
+        "chemical_registration.xlsx have an expiry_date that could not "
+        "be parsed (shown as blank/NaT). These rows are automatically "
+        "treated as EXPIRED, which may be why Active Registered "
+        "Products looks empty. Check the date format in that column "
+        "(e.g. Thai Buddhist year vs. Gregorian, or text dates)."
+    )
 
 # Automatically detect years
 year_columns = sorted([c for c in df.columns if isinstance(c, int)])
@@ -259,6 +277,29 @@ active_products = reg_df[
     (reg_df["concentration"] == concentration) &
     (reg_df["Current_Status"] == "ACTIVE")
 ]
+
+# Diagnostic: distinguish "no matching registration record at all" from
+# "matching record(s) exist but are all marked EXPIRED" -- these need
+# different fixes (data linkage vs. date parsing).
+_matches_any_status = reg_df[
+    (reg_df["common_name"] == chemical) &
+    (reg_df["formula_type"] == formula) &
+    (reg_df["concentration"] == concentration)
+]
+if active_products.empty and not _matches_any_status.empty:
+    st.info(
+        f"ℹ️ Found {len(_matches_any_status)} record(s) in "
+        "chemical_registration.xlsx matching this chemical / formula / "
+        "concentration, but all are marked EXPIRED (or have an "
+        "unparsed expiry date). Nothing to show as 'active'."
+    )
+elif active_products.empty and _matches_any_status.empty:
+    st.info(
+        "ℹ️ No record in chemical_registration.xlsx matches this "
+        f"combination: common_name='{chemical}', formula_type='{formula}', "
+        f"concentration='{concentration}'. Check that these values are "
+        "spelled/formatted the same way in both files."
+    )
 
 # ==================================================
 # Total Import - All Countries
