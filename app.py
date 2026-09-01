@@ -27,6 +27,40 @@ def load_data():
     import_df = pd.read_excel("chemical_import_2025.xlsx")
     reg_df = pd.read_excel("chemical_registration.xlsx")
 
+    # Normalize column names: strip whitespace / invisible characters
+    # so a re-exported Excel file with slightly different header
+    # formatting doesn't silently break every downstream lookup.
+    import_df.columns = import_df.columns.astype(str).str.strip()
+    reg_df.columns = reg_df.columns.astype(str).str.strip()
+
+    # Fail loudly (with a clear message) instead of a cryptic KeyError
+    # deep in the app if the registration file schema doesn't match
+    # what this dashboard expects.
+    required_reg_cols = [
+        "registration_number", "commercial_name", "common_name",
+        "concentration", "formula_type", "origin", "applicant",
+        "importer", "distributor", "registration_category",
+        "issue_date", "expiry_date", "moa_group",
+    ]
+    missing_reg_cols = [c for c in required_reg_cols if c not in reg_df.columns]
+    if missing_reg_cols:
+        st.error(
+            "chemical_registration.xlsx is missing expected column(s): "
+            f"{missing_reg_cols}\n\nColumns found in file: {list(reg_df.columns)}"
+        )
+        st.stop()
+
+    required_import_cols = [
+        "Common_Name", "Concentration", "Formula_Type", "Origin", "Type",
+    ]
+    missing_import_cols = [c for c in required_import_cols if c not in import_df.columns]
+    if missing_import_cols:
+        st.error(
+            "chemical_import_2025.xlsx is missing expected column(s): "
+            f"{missing_import_cols}\n\nColumns found in file: {list(import_df.columns)}"
+        )
+        st.stop()
+
     # Automatically detect year columns
     year_columns = [c for c in import_df.columns if isinstance(c, int)]
 
@@ -1112,4 +1146,3 @@ st.download_button(
     f"Top_{top_n}_{selected_type_name}.csv",
     "text/csv"
 )
-
