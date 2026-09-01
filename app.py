@@ -30,8 +30,15 @@ def load_data():
     # Normalize column names: strip whitespace / invisible characters
     # so a re-exported Excel file with slightly different header
     # formatting doesn't silently break every downstream lookup.
-    import_df.columns = import_df.columns.astype(str).str.strip()
-    reg_df.columns = reg_df.columns.astype(str).str.strip()
+    # IMPORTANT: only touch columns that are already strings -- the
+    # year columns (2020, 2021, ...) must stay as ints, since the
+    # rest of the app detects them via isinstance(c, int).
+    import_df.columns = [
+        c.strip() if isinstance(c, str) else c for c in import_df.columns
+    ]
+    reg_df.columns = [
+        c.strip() if isinstance(c, str) else c for c in reg_df.columns
+    ]
 
     # Fail loudly (with a clear message) instead of a cryptic KeyError
     # deep in the app if the registration file schema doesn't match
