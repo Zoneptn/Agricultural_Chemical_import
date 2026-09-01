@@ -134,10 +134,41 @@ df["Concentration"] = (
 )
 
 # Conver expiry_date
-reg_df["expiry_date"] = pd.to_datetime(
-    reg_df["expiry_date"],
-    errors="coerce"
+# The registration data commonly stores dates using the Thai Buddhist
+# Era (BE = CE + 543), e.g. "31/12/2568" instead of "31/12/2025".
+# pandas can't parse a 4-digit year like 2568 directly (it's outside
+# pandas' valid Timestamp range), so a straight pd.to_datetime() call
+# fails on every single row -- which is exactly the symptom seen here.
+def _parse_possibly_be_date(raw_series):
+    # First, try a normal parse (covers files that are already Gregorian).
+    parsed = pd.to_datetime(raw_series, errors="coerce", dayfirst=True)
+
+    still_missing = parsed.isna() & raw_series.notna()
+
+    if still_missing.any():
+        raw_str = raw_series.astype(str).str.strip()
+
+        def _convert_be(val):
+            m = re.search(r"(\d{4})", val)
+            if not m:
+                return pd.NaT
+            year = int(m.group(1))
+            if year > 2200:  # clearly a Buddhist Era year, not Gregorian
+                ce_year = year - 543
+                val_ce = val.replace(m.group(1), str(ce_year), 1)
+                return pd.to_datetime(val_ce, errors="coerce", dayfirst=True)
+            return pd.to_datetime(val, errors="coerce", dayfirst=True)
+
+        converted = raw_str[still_missing].apply(_convert_be)
+        parsed.loc[still_missing] = converted
+
+    return parsed
+
+_raw_expiry_sample = (
+    reg_df["expiry_date"].dropna().astype(str).head(5).tolist()
 )
+
+reg_df["expiry_date"] = _parse_possibly_be_date(reg_df["expiry_date"])
 
 # Diagnostic: if a large share of expiry_date failed to parse, every
 # row silently falls to "EXPIRED" and Active Registered Products will
@@ -148,11 +179,10 @@ _total_reg_rows = len(reg_df)
 if _total_reg_rows > 0 and (_unparsed_dates / _total_reg_rows) > 0.3:
     st.warning(
         f"⚠️ {_unparsed_dates} of {_total_reg_rows} rows in "
-        "chemical_registration.xlsx have an expiry_date that could not "
-        "be parsed (shown as blank/NaT). These rows are automatically "
-        "treated as EXPIRED, which may be why Active Registered "
-        "Products looks empty. Check the date format in that column "
-        "(e.g. Thai Buddhist year vs. Gregorian, or text dates)."
+        "chemical_registration.xlsx still have an expiry_date that "
+        "could not be parsed, even after trying a Thai Buddhist Era "
+        "(BE) conversion. These rows are treated as EXPIRED.\n\n"
+        f"Sample raw values from the column: {_raw_expiry_sample}"
     )
 
 # Automatically detect years
