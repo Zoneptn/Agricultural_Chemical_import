@@ -331,6 +331,63 @@ elif active_products.empty and _matches_any_status.empty:
         "spelled/formatted the same way in both files."
     )
 
+    # Show exactly what's in each file for this chemical so the
+    # mismatch (spacing, symbols, abbreviations, etc.) is visible
+    # instead of guessed at.
+    with st.expander("🔍 Debug: compare values between the two files"):
+
+        st.write(f"**Selected in sidebar (from chemical_import_2025.xlsx):**")
+        st.write(
+            f"- common_name: `{chemical}`\n"
+            f"- formula_type: `{formula}`\n"
+            f"- concentration: `{concentration}`"
+        )
+
+        reg_same_name = reg_df[reg_df["common_name"] == chemical]
+
+        if reg_same_name.empty:
+            # Try a loose, case/space-insensitive match to see if the
+            # chemical exists under a slightly different spelling.
+            loose = reg_df[
+                reg_df["common_name"].str.replace(" ", "", regex=False)
+                == chemical.replace(" ", "")
+            ]
+            st.write(
+                f"No rows in chemical_registration.xlsx have "
+                f"common_name == `{chemical}` at all."
+            )
+            if not loose.empty:
+                st.write(
+                    "But found close matches ignoring spaces -- "
+                    "here's how common_name is actually spelled in "
+                    "the registration file:"
+                )
+                st.write(sorted(loose["common_name"].unique().tolist()))
+            else:
+                st.write(
+                    "No close match either. Here are some sample "
+                    "common_name values that *do* exist in "
+                    "chemical_registration.xlsx, for comparison:"
+                )
+                st.write(sorted(reg_df["common_name"].dropna().unique().tolist())[:30])
+        else:
+            st.write(
+                f"Found {len(reg_same_name)} row(s) in "
+                "chemical_registration.xlsx with matching common_name. "
+                "Their formula_type / concentration values are:"
+            )
+            st.dataframe(
+                reg_same_name[["formula_type", "concentration"]]
+                .drop_duplicates()
+                .reset_index(drop=True),
+                use_container_width=True
+            )
+            st.write(
+                "Compare these against the sidebar values above -- "
+                "look for extra/missing spaces, % signs, or different "
+                "abbreviations."
+            )
+
 # ==================================================
 # Total Import - All Countries
 # ==================================================
