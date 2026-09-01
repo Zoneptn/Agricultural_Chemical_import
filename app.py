@@ -12,7 +12,7 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("🧪 Argicultural Chemical Import Volume (liter/kg) Dashboard")
+st.title("🧪 Agricultural Chemical Dashboard")
 ## reset and reload data
 if st.button("🔄 Reload Latest Data"):
     st.cache_data.clear()
@@ -208,1018 +208,1190 @@ reg_df["Current_Status"] = np.where(
 
 
 
-## Part1
-# ==================================================
-# Total Import
-# ==================================================
 
-st.divider()
-st.header("📊 Total Import by Chemical")
+# ==================================================
+# Page / View Selector
+# ==================================================
+st.sidebar.header("Dashboard View")
 
-st.write(
-    "This section summarizes the total import volume across **all origins** "
-    "for a selected chemical and concentration."
+page = st.sidebar.radio(
+    "Select a view",
+    ["📦 Import Volume Dashboard", "📋 Registration Search"],
+    label_visibility="collapsed"
 )
 
-# ==================================================
-# Sidebar
-# ==================================================
+st.sidebar.divider()
 
-st.sidebar.header("Search")
+if page == "📦 Import Volume Dashboard":
+    ## Part1
+    # ==================================================
+    # Total Import
+    # ==================================================
 
-# --------------------------------------------------
-# Chemical
-# --------------------------------------------------
+    st.divider()
+    st.header("📊 Total Import by Chemical")
 
-chemical = st.sidebar.selectbox(
-    "Chemical",
-    sorted(df["Common_Name"].dropna().unique())
-)
-
-# --------------------------------------------------
-# Concentration
-# --------------------------------------------------
-
-concentration = st.sidebar.selectbox(
-    "Concentration",
-    sorted(
-        df.loc[
-            df["Common_Name"] == chemical,
-            "Concentration"
-        ].dropna().unique()
+    st.write(
+        "This section summarizes the total import volume across **all origins** "
+        "for a selected chemical and concentration."
     )
-)
 
-# --------------------------------------------------
-# Formula Type
-# --------------------------------------------------
+    # ==================================================
+    # Sidebar
+    # ==================================================
 
-formula = st.sidebar.selectbox(
-    "Formula Type",
-    sorted(
+    st.sidebar.header("Search")
+
+    # --------------------------------------------------
+    # Chemical
+    # --------------------------------------------------
+
+    chemical = st.sidebar.selectbox(
+        "Chemical",
+        sorted(df["Common_Name"].dropna().unique())
+    )
+
+    # --------------------------------------------------
+    # Concentration
+    # --------------------------------------------------
+
+    concentration = st.sidebar.selectbox(
+        "Concentration",
+        sorted(
+            df.loc[
+                df["Common_Name"] == chemical,
+                "Concentration"
+            ].dropna().unique()
+        )
+    )
+
+    # --------------------------------------------------
+    # Formula Type
+    # --------------------------------------------------
+
+    formula = st.sidebar.selectbox(
+        "Formula Type",
+        sorted(
+            df.loc[
+                (df["Common_Name"] == chemical) &
+                (df["Concentration"] == concentration),
+                "Formula_Type"
+            ].dropna().unique()
+        )
+    )
+
+    # --------------------------------------------------
+    # Country / Origin
+    # --------------------------------------------------
+
+    countries = sorted(
         df.loc[
             (df["Common_Name"] == chemical) &
-            (df["Concentration"] == concentration),
-            "Formula_Type"
+            (df["Concentration"] == concentration) &
+            (df["Formula_Type"] == formula),
+            "Origin"
         ].dropna().unique()
     )
-)
 
-# --------------------------------------------------
-# Country / Origin
-# --------------------------------------------------
+    selected_country = st.sidebar.selectbox(
+        "Country",
+        ["All Countries"] + countries
+    )
 
-countries = sorted(
-    df.loc[
+    # ==================================================
+    # Filter Chemical + Concentration + Formula
+    # ==================================================
+
+    filtered_total = df[
         (df["Common_Name"] == chemical) &
-        (df["Concentration"] == concentration) &
-        (df["Formula_Type"] == formula),
-        "Origin"
-    ].dropna().unique()
-)
-
-selected_country = st.sidebar.selectbox(
-    "Country",
-    ["All Countries"] + countries
-)
-
-# ==================================================
-# Filter Chemical + Concentration + Formula
-# ==================================================
-
-filtered_total = df[
-    (df["Common_Name"] == chemical) &
-    (df["Formula_Type"] == formula) &
-    (df["Concentration"] == concentration)
-]
-
-if filtered_total.empty:
-    st.warning("No matching record found.")
-    st.stop()
-
-# ==================================================
-# Active Registered Products
-# ==================================================
-
-active_products = reg_df[
-    (reg_df["common_name"] == chemical) &
-    (reg_df["formula_type"] == formula) &
-    (reg_df["concentration"] == concentration) &
-    (reg_df["Current_Status"] == "ACTIVE")
-]
-
-# Diagnostic: distinguish "no matching registration record at all" from
-# "matching record(s) exist but are all marked EXPIRED" -- these need
-# different fixes (data linkage vs. date parsing).
-_matches_any_status = reg_df[
-    (reg_df["common_name"] == chemical) &
-    (reg_df["formula_type"] == formula) &
-    (reg_df["concentration"] == concentration)
-]
-if active_products.empty and not _matches_any_status.empty:
-    st.info(
-        f"ℹ️ Found {len(_matches_any_status)} record(s) in "
-        "chemical_registration.xlsx matching this chemical / formula / "
-        "concentration, but all are marked EXPIRED (or have an "
-        "unparsed expiry date). Nothing to show as 'active'."
-    )
-elif active_products.empty and _matches_any_status.empty:
-    st.info(
-        "ℹ️ No record in chemical_registration.xlsx matches this "
-        f"combination: common_name='{chemical}', formula_type='{formula}', "
-        f"concentration='{concentration}'."
-    )
-
-# ==================================================
-# Total Import - All Countries
-# ==================================================
-
-yearly_total = (
-    filtered_total[year_columns]
-    .sum()
-    .fillna(0)
-)
-
-yearly_df = pd.DataFrame({
-    "Year": year_columns,
-    "Volume": yearly_total.values
-})
-
-# ==================================================
-# Country Import by Year
-# ==================================================
-
-if selected_country == "All Countries":
-
-    # Sum all countries together
-    chart_yearly_df = pd.DataFrame({
-        "Year": year_columns,
-        "Volume": (
-            filtered_total[year_columns]
-            .sum()
-            .fillna(0)
-            .values
-        )
-    })
-
-else:
-
-    # Import from selected country only
-    selected_country_data = filtered_total[
-        filtered_total["Origin"] == selected_country
+        (df["Formula_Type"] == formula) &
+        (df["Concentration"] == concentration)
     ]
 
-    chart_yearly_df = pd.DataFrame({
-        "Year": year_columns,
-        "Volume": (
-            selected_country_data[year_columns]
-            .sum()
-            .fillna(0)
-            .values
+    if filtered_total.empty:
+        st.warning("No matching record found.")
+        st.stop()
+
+    # ==================================================
+    # Active Registered Products
+    # ==================================================
+
+    active_products = reg_df[
+        (reg_df["common_name"] == chemical) &
+        (reg_df["formula_type"] == formula) &
+        (reg_df["concentration"] == concentration) &
+        (reg_df["Current_Status"] == "ACTIVE")
+    ]
+
+    # Diagnostic: distinguish "no matching registration record at all" from
+    # "matching record(s) exist but are all marked EXPIRED" -- these need
+    # different fixes (data linkage vs. date parsing).
+    _matches_any_status = reg_df[
+        (reg_df["common_name"] == chemical) &
+        (reg_df["formula_type"] == formula) &
+        (reg_df["concentration"] == concentration)
+    ]
+    if active_products.empty and not _matches_any_status.empty:
+        st.info(
+            f"ℹ️ Found {len(_matches_any_status)} record(s) in "
+            "chemical_registration.xlsx matching this chemical / formula / "
+            "concentration, but all are marked EXPIRED (or have an "
+            "unparsed expiry date). Nothing to show as 'active'."
         )
+    elif active_products.empty and _matches_any_status.empty:
+        st.info(
+            "ℹ️ No record in chemical_registration.xlsx matches this "
+            f"combination: common_name='{chemical}', formula_type='{formula}', "
+            f"concentration='{concentration}'."
+        )
+
+    # ==================================================
+    # Total Import - All Countries
+    # ==================================================
+
+    yearly_total = (
+        filtered_total[year_columns]
+        .sum()
+        .fillna(0)
+    )
+
+    yearly_df = pd.DataFrame({
+        "Year": year_columns,
+        "Volume": yearly_total.values
     })
 
+    # ==================================================
+    # Country Import by Year
+    # ==================================================
+
+    if selected_country == "All Countries":
+
+        # Sum all countries together
+        chart_yearly_df = pd.DataFrame({
+            "Year": year_columns,
+            "Volume": (
+                filtered_total[year_columns]
+                .sum()
+                .fillna(0)
+                .values
+            )
+        })
+
+    else:
+
+        # Import from selected country only
+        selected_country_data = filtered_total[
+            filtered_total["Origin"] == selected_country
+        ]
+
+        chart_yearly_df = pd.DataFrame({
+            "Year": year_columns,
+            "Volume": (
+                selected_country_data[year_columns]
+                .sum()
+                .fillna(0)
+                .values
+            )
+        })
 
 
-# ==================================================
-# KPI
-# ==================================================
 
-total_import = yearly_df["Volume"].sum()
+    # ==================================================
+    # KPI
+    # ==================================================
 
-country_count = filtered_total["Origin"].nunique()
+    total_import = yearly_df["Volume"].sum()
 
-chemical_type = filtered_total.iloc[0]["Type"].upper()
+    country_count = filtered_total["Origin"].nunique()
 
-k1, k2, k3 = st.columns(3)
+    chemical_type = filtered_total.iloc[0]["Type"].upper()
 
-with k1:
+    k1, k2, k3 = st.columns(3)
+
+    with k1:
+        st.metric(
+            "Total Import(liter/kg)",
+            f"{total_import:,.0f}"
+        )
+
+    with k2:
+        st.metric(
+            "Number of Origins",
+            country_count
+        )
+
+    with k3:
+        st.metric(
+            "Chemical Type",
+            chemical_type
+        )
+
+    # ==================================================
+    # Yearly Import + Line Chart
+    # ==================================================
+
+    left, right = st.columns([1, 2])
+
+    # --------------------------------------------------
+    # Table
+    # --------------------------------------------------
+
+    with left:
+
+        if selected_country == "All Countries":
+
+            st.subheader("Yearly Import - All Countries")
+
+        else:
+
+            st.subheader(
+                f"Yearly Import - {selected_country}"
+            )
+
+        st.dataframe(
+            chart_yearly_df,
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "Volume": st.column_config.NumberColumn(
+                    "Volume(liter/kg)",
+                    format="%,.0f"
+                )
+            }
+        )
+
+    # --------------------------------------------------
+    # Line Chart
+    # --------------------------------------------------
+    with right:
+
+        if selected_country == "All Countries":
+
+            chart_title = (
+                f"{chemical} ({formula} - {concentration}) "
+                "— All Countries"
+            )
+
+        else:
+
+            chart_title = (
+                f"{chemical} ({formula} - {concentration}) "
+                f"— {selected_country}"
+            )
+
+        fig_total = px.line(
+            chart_yearly_df,
+            x="Year",
+            y="Volume",
+            markers=True,
+            title=chart_title
+        )
+
+        fig_total.update_layout(
+            height=500,
+            xaxis_title="Year",
+            yaxis_title="Import Volume"
+        )
+
+        fig_total.update_traces(
+            hovertemplate=
+            "<b>Year:</b> %{x}<br>"
+            "<b>Volume:</b> %{y:,.1f}<extra></extra>"
+        )
+
+        st.plotly_chart(
+            fig_total,
+            use_container_width=True
+        )
+
+    # ==================================================
+    # Country Breakdown
+    # ==================================================
+
+    st.subheader("Origin Contribution")
+
+    country_total = (
+        filtered_total
+        .assign(
+            Total=filtered_total[year_columns].sum(axis=1)
+        )
+        .groupby(
+            "Origin",
+            as_index=False
+        )["Total"]
+        .sum()
+        .sort_values(
+            "Total",
+            ascending=False
+        )
+    )
+
+    left, right = st.columns([1, 2])
+
+    # --------------------------------------------------
+    # Country Table
+    # --------------------------------------------------
+
+    with left:
+
+        st.dataframe(
+            country_total,
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "Total": st.column_config.NumberColumn(
+                    "Total Import(liter/kg)",
+                    format="%,.0f"
+                )
+            }
+        )
+
+    # --------------------------------------------------
+    # Country Bar Chart
+    # --------------------------------------------------
+
+    with right:
+
+        fig_country = px.bar(
+            country_total,
+            x="Origin",
+            y="Total",
+            title="Total Import by Origin"
+        )
+
+        fig_country.update_layout(
+            height=500,
+            xaxis_title="Origin",
+            yaxis_title="Total Import"
+        )
+
+        fig_country.update_traces(
+            hovertemplate=
+            "<b>Country:</b> %{x}<br>"
+            "<b>Volume:</b> %{y:,.1f}<extra></extra>"
+        )
+
+        st.plotly_chart(
+            fig_country,
+            use_container_width=True
+        )
+
+    # ==================================================
+    # Download
+    # ==================================================
+
+    csv_total = yearly_df.to_csv(
+        index=False
+    ).encode("utf-8")
+
+    st.download_button(
+        "Download Total Import",
+        csv_total,
+        "total_import_all_countries.csv",
+        "text/csv"
+    )
+
+    # ==================================================
+    # Company Import Table
+    # ==================================================
+
+    st.divider()
+    st.subheader("Active Registered Products")
+
+    k1, k2 = st.columns(2)
+
+    with k1:
+        st.metric(
+            "Active Products",
+            len(active_products)
+        )
+
+    with k2:
+        st.metric(
+            "Distributors",
+            active_products["distributor"].nunique()
+        )
+
+    if active_products.empty:
+
+        st.info(
+            "No active registered products found for this chemical."
+        )
+
+    else:
+
+        display_cols = [
+            "registration_number",
+            "commercial_name",
+            "distributor",
+            "origin",
+            "applicant",
+            "expiry_date"
+        ]
+
+        st.dataframe(
+            active_products[display_cols],
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "expiry_date": st.column_config.DateColumn(
+                    "Expiry Date",
+                    format="DD-MM-YYYY"
+                )
+            }
+        )
+    # ==================================================
+    # Chemical Comparison
+    # ==================================================
+
+    st.divider()
+    st.header("📈 Chemical Comparison")
+
+    st.write(
+        "Compare import volumes for up to 10 chemical products."
+    )
+
+    # ----------------------------------------
+    # Number of chemicals
+    # ----------------------------------------
+
+    num_compare = st.slider(
+        "Number of Chemicals to Compare",
+        min_value=2,
+        max_value=10,
+        value=2
+    )
+
+    compare_data = []
+
+    # ----------------------------------------
+    # Selection boxes
+    # ----------------------------------------
+
+    for i in range(num_compare):
+
+        st.subheader(f"Chemical {i+1}")
+
+        col1, col2, col3, col4 = st.columns(4)
+
+        # ----------------------------------------
+        # Common Name
+        # ----------------------------------------
+
+        with col1:
+
+            chemical_i = st.selectbox(
+                "Common Name",
+                sorted(
+                    df["Common_Name"]
+                    .dropna()
+                    .unique()
+                ),
+                key=f"chemical_{i}"
+            )
+
+        # ----------------------------------------
+        # Concentration
+        # ----------------------------------------
+
+        with col2:
+
+            concentration_i = st.selectbox(
+                "Concentration",
+                sorted(
+                    df.loc[
+                        df["Common_Name"] == chemical_i,
+                        "Concentration"
+                    ]
+                    .dropna()
+                    .unique()
+                ),
+                key=f"conc_{i}"
+            )
+
+        # ----------------------------------------
+        # Formula Type
+        # ----------------------------------------
+
+        with col3:
+
+            formula_i = st.selectbox(
+                "Formula Type",
+                sorted(
+                    df.loc[
+                        (df["Common_Name"] == chemical_i) &
+                        (df["Concentration"] == concentration_i),
+                        "Formula_Type"
+                    ]
+                    .dropna()
+                    .unique()
+                ),
+                key=f"formula_{i}"
+            )
+
+        # ----------------------------------------
+        # Country
+        # ----------------------------------------
+
+        with col4:
+
+            countries_i = sorted(
+                df.loc[
+                    (df["Common_Name"] == chemical_i) &
+                    (df["Concentration"] == concentration_i) &
+                    (df["Formula_Type"] == formula_i),
+                    "Origin"
+                ]
+                .dropna()
+                .unique()
+            )
+
+            country_i = st.selectbox(
+                "Country",
+                ["All Countries"] + countries_i,
+                key=f"country_{i}"
+            )
+
+        # ----------------------------------------
+        # Filter
+        # ----------------------------------------
+
+        temp = df[
+            (df["Common_Name"] == chemical_i) &
+            (df["Concentration"] == concentration_i) &
+            (df["Formula_Type"] == formula_i)
+        ]
+
+        # ----------------------------------------
+        # Country filter
+        # ----------------------------------------
+
+        if country_i != "All Countries":
+
+            temp = temp[
+                temp["Origin"] == country_i
+            ]
+
+        # ----------------------------------------
+        # Create yearly data
+        # ----------------------------------------
+
+        if not temp.empty:
+
+            yearly = (
+                temp[year_columns]
+                .sum()
+                .fillna(0)
+            )
+
+            temp_df = pd.DataFrame({
+                "Year": year_columns,
+                "Volume": yearly.values
+            })
+
+            # ----------------------------------------
+            # Label for chart
+            # ----------------------------------------
+
+            if country_i == "All Countries":
+
+                chemical_label = (
+                    chemical_i +
+                    " | " +
+                    concentration_i +
+                    " | " +
+                    formula_i +
+                    " | All Countries"
+                )
+
+            else:
+
+                chemical_label = (
+                    chemical_i +
+                    " | " +
+                    concentration_i +
+                    " | " +
+                    formula_i +
+                    " | " +
+                    country_i
+                )
+
+            temp_df["Chemical"] = chemical_label
+
+            compare_data.append(temp_df)
+
+    # ==================================================
+    # Plot
+    # ==================================================
+
+    if compare_data:
+
+        compare_df = pd.concat(
+            compare_data,
+            ignore_index=True
+        )
+
+        fig_compare = px.line(
+            compare_df,
+            x="Year",
+            y="Volume",
+            color="Chemical",
+            markers=True,
+            template="plotly_white"
+        )
+
+        fig_compare.update_layout(
+            title="Chemical Import Comparison",
+            xaxis_title="Year",
+            yaxis_title="Import Volume",
+            hovermode="x unified",
+            legend_title="Chemical",
+            height=650
+        )
+
+        fig_compare.update_yaxes(
+            tickformat=","
+        )
+
+        fig_compare.update_traces(
+            hovertemplate=
+            "<b>%{fullData.name}</b><br>" +
+            "Year: %{x}<br>" +
+            "Volume: %{y:,.1f}<extra></extra>"
+        )
+
+        st.plotly_chart(
+            fig_compare,
+            use_container_width=True
+        )
+    # ==================================================
+    # Import Comparison by Type
+    # ==================================================
+    st.divider()
+    st.header("📊 Import Comparison by Type")
+
+    # Display names for chemical types
+    type_mapping = {
+        "HER": "Herbicide",
+        "FUN": "Fungicide",
+        "INS": "Insecticide",
+        "PGR": "Plant Growth Regulator",
+        "FUM": "Fumigant",
+        "ACR": "Acaricide",
+        "BIO": "Biopesticide",
+        "ROD": "Rodenticide",
+        "NEM": "Nematicide",
+        "mol": "Molluscicide",
+        "synergist": "Synergist",
+        "OTHER": "Other"
+    }
+
+    # Create comparison dataframe
+    comparison = (
+        df.groupby("Type")[year_columns]
+          .sum(numeric_only=True)
+          .reset_index()
+    )
+
+    comparison["Type_Name"] = comparison["Type"].map(type_mapping)
+
+    # -----------------------------
+    # Select types to compare
+    # -----------------------------
+    selected_types = st.multiselect(
+        "Select chemical types",
+        comparison["Type_Name"].tolist(),
+        default=["Herbicide", "Fungicide", "Insecticide"]
+    )
+
+    comparison = comparison[
+        comparison["Type_Name"].isin(selected_types)
+    ]
+
+    # -----------------------------
+    # Convert to long format
+    # -----------------------------
+    comparison_long = comparison.melt(
+        id_vars=["Type", "Type_Name"],
+        value_vars=year_columns,
+        var_name="Year",
+        value_name="Import Volume"
+    )
+
+    comparison_long["Import Volume"] = comparison_long["Import Volume"].fillna(0)
+
+    # -----------------------------
+    # KPI
+    # -----------------------------
+    total_import = comparison_long["Import Volume"].sum()
+
     st.metric(
-        "Total Import(liter/kg)",
+        "Total Import Volume",
         f"{total_import:,.0f}"
     )
 
-with k2:
-    st.metric(
-        "Number of Origins",
-        country_count
-    )
+    # -----------------------------
+    # Table + Charts
+    # -----------------------------
+    left, right = st.columns([1,2])
 
-with k3:
-    st.metric(
-        "Chemical Type",
-        chemical_type
-    )
+    with left:
 
-# ==================================================
-# Yearly Import + Line Chart
-# ==================================================
+        table = comparison_long.pivot(
+            index="Year",
+            columns="Type_Name",
+            values="Import Volume"
+        ).fillna(0)
 
-left, right = st.columns([1, 2])
-
-# --------------------------------------------------
-# Table
-# --------------------------------------------------
-
-with left:
-
-    if selected_country == "All Countries":
-
-        st.subheader("Yearly Import - All Countries")
-
-    else:
-
-        st.subheader(
-            f"Yearly Import - {selected_country}"
-        )
-
-    st.dataframe(
-        chart_yearly_df,
-        hide_index=True,
-        use_container_width=True,
-        column_config={
-            "Volume": st.column_config.NumberColumn(
-                "Volume(liter/kg)",
+        st.dataframe(
+            table,
+            use_container_width=True,
+            column_config={
+            col: st.column_config.NumberColumn(
+                col,
                 format="%,.0f"
             )
+            for col in table.columns
         }
-    )
-
-# --------------------------------------------------
-# Line Chart
-# --------------------------------------------------
-with right:
-
-    if selected_country == "All Countries":
-
-        chart_title = (
-            f"{chemical} ({formula} - {concentration}) "
-            "— All Countries"
         )
 
-    else:
+    with right:
 
-        chart_title = (
-            f"{chemical} ({formula} - {concentration}) "
-            f"— {selected_country}"
+        fig = px.line(
+            comparison_long,
+            x="Year",
+            y="Import Volume",
+            color="Type_Name",
+            markers=True,
+            title="Import Volume by Chemical Type"
         )
 
-    fig_total = px.line(
-        chart_yearly_df,
-        x="Year",
-        y="Volume",
-        markers=True,
-        title=chart_title
-    )
+        fig.update_layout(
+            height=550,
+            xaxis_title="Year",
+            yaxis_title="Import Volume"
+        )
 
-    fig_total.update_layout(
-        height=500,
-        xaxis_title="Year",
-        yaxis_title="Import Volume"
-    )
-
-    fig_total.update_traces(
+        fig.update_traces(
         hovertemplate=
         "<b>Year:</b> %{x}<br>"
         "<b>Volume:</b> %{y:,.1f}<extra></extra>"
     )
 
-    st.plotly_chart(
-        fig_total,
-        use_container_width=True
-    )
-
-# ==================================================
-# Country Breakdown
-# ==================================================
-
-st.subheader("Origin Contribution")
-
-country_total = (
-    filtered_total
-    .assign(
-        Total=filtered_total[year_columns].sum(axis=1)
-    )
-    .groupby(
-        "Origin",
-        as_index=False
-    )["Total"]
-    .sum()
-    .sort_values(
-        "Total",
-        ascending=False
-    )
-)
-
-left, right = st.columns([1, 2])
-
-# --------------------------------------------------
-# Country Table
-# --------------------------------------------------
-
-with left:
-
-    st.dataframe(
-        country_total,
-        hide_index=True,
-        use_container_width=True,
-        column_config={
-            "Total": st.column_config.NumberColumn(
-                "Total Import(liter/kg)",
-                format="%,.0f"
-            )
-        }
-    )
-
-# --------------------------------------------------
-# Country Bar Chart
-# --------------------------------------------------
-
-with right:
-
-    fig_country = px.bar(
-        country_total,
-        x="Origin",
-        y="Total",
-        title="Total Import by Origin"
-    )
-
-    fig_country.update_layout(
-        height=500,
-        xaxis_title="Origin",
-        yaxis_title="Total Import"
-    )
-
-    fig_country.update_traces(
-        hovertemplate=
-        "<b>Country:</b> %{x}<br>"
-        "<b>Volume:</b> %{y:,.1f}<extra></extra>"
-    )
-
-    st.plotly_chart(
-        fig_country,
-        use_container_width=True
-    )
-
-# ==================================================
-# Download
-# ==================================================
-
-csv_total = yearly_df.to_csv(
-    index=False
-).encode("utf-8")
-
-st.download_button(
-    "Download Total Import",
-    csv_total,
-    "total_import_all_countries.csv",
-    "text/csv"
-)
-
-# ==================================================
-# Company Import Table
-# ==================================================
-
-st.divider()
-st.subheader("Active Registered Products")
-
-k1, k2 = st.columns(2)
-
-with k1:
-    st.metric(
-        "Active Products",
-        len(active_products)
-    )
-
-with k2:
-    st.metric(
-        "Distributors",
-        active_products["distributor"].nunique()
-    )
-
-if active_products.empty:
-
-    st.info(
-        "No active registered products found for this chemical."
-    )
-
-else:
-
-    display_cols = [
-        "registration_number",
-        "commercial_name",
-        "distributor",
-        "origin",
-        "applicant",
-        "expiry_date"
-    ]
-
-    st.dataframe(
-        active_products[display_cols],
-        hide_index=True,
-        use_container_width=True,
-        column_config={
-            "expiry_date": st.column_config.DateColumn(
-                "Expiry Date",
-                format="DD-MM-YYYY"
-            )
-        }
-    )
-# ==================================================
-# Chemical Comparison
-# ==================================================
-
-st.divider()
-st.header("📈 Chemical Comparison")
-
-st.write(
-    "Compare import volumes for up to 10 chemical products."
-)
-
-# ----------------------------------------
-# Number of chemicals
-# ----------------------------------------
-
-num_compare = st.slider(
-    "Number of Chemicals to Compare",
-    min_value=2,
-    max_value=10,
-    value=2
-)
-
-compare_data = []
-
-# ----------------------------------------
-# Selection boxes
-# ----------------------------------------
-
-for i in range(num_compare):
-
-    st.subheader(f"Chemical {i+1}")
-
-    col1, col2, col3, col4 = st.columns(4)
-
-    # ----------------------------------------
-    # Common Name
-    # ----------------------------------------
-
-    with col1:
-
-        chemical_i = st.selectbox(
-            "Common Name",
-            sorted(
-                df["Common_Name"]
-                .dropna()
-                .unique()
-            ),
-            key=f"chemical_{i}"
+        st.plotly_chart(
+            fig,
+            use_container_width=True
         )
 
-    # ----------------------------------------
-    # Concentration
-    # ----------------------------------------
+    # -----------------------------
+    # Stacked Bar Chart
+    # -----------------------------
+    st.subheader("Stacked Comparison")
 
-    with col2:
-
-        concentration_i = st.selectbox(
-            "Concentration",
-            sorted(
-                df.loc[
-                    df["Common_Name"] == chemical_i,
-                    "Concentration"
-                ]
-                .dropna()
-                .unique()
-            ),
-            key=f"conc_{i}"
-        )
-
-    # ----------------------------------------
-    # Formula Type
-    # ----------------------------------------
-
-    with col3:
-
-        formula_i = st.selectbox(
-            "Formula Type",
-            sorted(
-                df.loc[
-                    (df["Common_Name"] == chemical_i) &
-                    (df["Concentration"] == concentration_i),
-                    "Formula_Type"
-                ]
-                .dropna()
-                .unique()
-            ),
-            key=f"formula_{i}"
-        )
-
-    # ----------------------------------------
-    # Country
-    # ----------------------------------------
-
-    with col4:
-
-        countries_i = sorted(
-            df.loc[
-                (df["Common_Name"] == chemical_i) &
-                (df["Concentration"] == concentration_i) &
-                (df["Formula_Type"] == formula_i),
-                "Origin"
-            ]
-            .dropna()
-            .unique()
-        )
-
-        country_i = st.selectbox(
-            "Country",
-            ["All Countries"] + countries_i,
-            key=f"country_{i}"
-        )
-
-    # ----------------------------------------
-    # Filter
-    # ----------------------------------------
-
-    temp = df[
-        (df["Common_Name"] == chemical_i) &
-        (df["Concentration"] == concentration_i) &
-        (df["Formula_Type"] == formula_i)
-    ]
-
-    # ----------------------------------------
-    # Country filter
-    # ----------------------------------------
-
-    if country_i != "All Countries":
-
-        temp = temp[
-            temp["Origin"] == country_i
-        ]
-
-    # ----------------------------------------
-    # Create yearly data
-    # ----------------------------------------
-
-    if not temp.empty:
-
-        yearly = (
-            temp[year_columns]
-            .sum()
-            .fillna(0)
-        )
-
-        temp_df = pd.DataFrame({
-            "Year": year_columns,
-            "Volume": yearly.values
-        })
-
-        # ----------------------------------------
-        # Label for chart
-        # ----------------------------------------
-
-        if country_i == "All Countries":
-
-            chemical_label = (
-                chemical_i +
-                " | " +
-                concentration_i +
-                " | " +
-                formula_i +
-                " | All Countries"
-            )
-
-        else:
-
-            chemical_label = (
-                chemical_i +
-                " | " +
-                concentration_i +
-                " | " +
-                formula_i +
-                " | " +
-                country_i
-            )
-
-        temp_df["Chemical"] = chemical_label
-
-        compare_data.append(temp_df)
-
-# ==================================================
-# Plot
-# ==================================================
-
-if compare_data:
-
-    compare_df = pd.concat(
-        compare_data,
-        ignore_index=True
-    )
-
-    fig_compare = px.line(
-        compare_df,
-        x="Year",
-        y="Volume",
-        color="Chemical",
-        markers=True,
-        template="plotly_white"
-    )
-
-    fig_compare.update_layout(
-        title="Chemical Import Comparison",
-        xaxis_title="Year",
-        yaxis_title="Import Volume",
-        hovermode="x unified",
-        legend_title="Chemical",
-        height=650
-    )
-
-    fig_compare.update_yaxes(
-        tickformat=","
-    )
-
-    fig_compare.update_traces(
-        hovertemplate=
-        "<b>%{fullData.name}</b><br>" +
-        "Year: %{x}<br>" +
-        "Volume: %{y:,.1f}<extra></extra>"
-    )
-
-    st.plotly_chart(
-        fig_compare,
-        use_container_width=True
-    )
-# ==================================================
-# Import Comparison by Type
-# ==================================================
-st.divider()
-st.header("📊 Import Comparison by Type")
-
-# Display names for chemical types
-type_mapping = {
-    "HER": "Herbicide",
-    "FUN": "Fungicide",
-    "INS": "Insecticide",
-    "PGR": "Plant Growth Regulator",
-    "FUM": "Fumigant",
-    "ACR": "Acaricide",
-    "BIO": "Biopesticide",
-    "ROD": "Rodenticide",
-    "NEM": "Nematicide",
-    "mol": "Molluscicide",
-    "synergist": "Synergist",
-    "OTHER": "Other"
-}
-
-# Create comparison dataframe
-comparison = (
-    df.groupby("Type")[year_columns]
-      .sum(numeric_only=True)
-      .reset_index()
-)
-
-comparison["Type_Name"] = comparison["Type"].map(type_mapping)
-
-# -----------------------------
-# Select types to compare
-# -----------------------------
-selected_types = st.multiselect(
-    "Select chemical types",
-    comparison["Type_Name"].tolist(),
-    default=["Herbicide", "Fungicide", "Insecticide"]
-)
-
-comparison = comparison[
-    comparison["Type_Name"].isin(selected_types)
-]
-
-# -----------------------------
-# Convert to long format
-# -----------------------------
-comparison_long = comparison.melt(
-    id_vars=["Type", "Type_Name"],
-    value_vars=year_columns,
-    var_name="Year",
-    value_name="Import Volume"
-)
-
-comparison_long["Import Volume"] = comparison_long["Import Volume"].fillna(0)
-
-# -----------------------------
-# KPI
-# -----------------------------
-total_import = comparison_long["Import Volume"].sum()
-
-st.metric(
-    "Total Import Volume",
-    f"{total_import:,.0f}"
-)
-
-# -----------------------------
-# Table + Charts
-# -----------------------------
-left, right = st.columns([1,2])
-
-with left:
-
-    table = comparison_long.pivot(
-        index="Year",
-        columns="Type_Name",
-        values="Import Volume"
-    ).fillna(0)
-
-    st.dataframe(
-        table,
-        use_container_width=True,
-        column_config={
-        col: st.column_config.NumberColumn(
-            col,
-            format="%,.0f"
-        )
-        for col in table.columns
-    }
-    )
-
-with right:
-
-    fig = px.line(
+    fig2 = px.bar(
         comparison_long,
         x="Year",
         y="Import Volume",
         color="Type_Name",
-        markers=True,
-        title="Import Volume by Chemical Type"
+        title="Total Import Volume by Year",
+        barmode="stack"
     )
 
-    fig.update_layout(
-        height=550,
+    fig2.update_layout(
+        height=600,
         xaxis_title="Year",
         yaxis_title="Import Volume"
     )
-    
-    fig.update_traces(
-    hovertemplate=
-    "<b>Year:</b> %{x}<br>"
-    "<b>Volume:</b> %{y:,.1f}<extra></extra>"
-)
 
+    fig2.update_traces(
+        hovertemplate=
+        "<b>Year:</b> %{x}<br>"
+        "<b>Volume:</b> %{y:,.1f}<extra></extra>"
+    )
     st.plotly_chart(
-        fig,
+        fig2,
         use_container_width=True
     )
 
-# -----------------------------
-# Stacked Bar Chart
-# -----------------------------
-st.subheader("Stacked Comparison")
+    # -----------------------------
+    # Download
+    # -----------------------------
+    csv_compare = table.reset_index().to_csv(index=False).encode("utf-8")
 
-fig2 = px.bar(
-    comparison_long,
-    x="Year",
-    y="Import Volume",
-    color="Type_Name",
-    title="Total Import Volume by Year",
-    barmode="stack"
-)
-
-fig2.update_layout(
-    height=600,
-    xaxis_title="Year",
-    yaxis_title="Import Volume"
-)
-
-fig2.update_traces(
-    hovertemplate=
-    "<b>Year:</b> %{x}<br>"
-    "<b>Volume:</b> %{y:,.1f}<extra></extra>"
-)
-st.plotly_chart(
-    fig2,
-    use_container_width=True
-)
-
-# -----------------------------
-# Download
-# -----------------------------
-csv_compare = table.reset_index().to_csv(index=False).encode("utf-8")
-
-st.download_button(
-    "Download Comparison Table",
-    csv_compare,
-    "type_comparison.csv",
-    "text/csv"
-)
-
-## Part 4 
-# ==================================================
-# Top N Chemicals by Type
-# ==================================================
-st.divider()
-st.header("🏆 Top Chemicals by Type")
-
-type_mapping = {
-    "HER": "Herbicide",
-    "FUN": "Fungicide",
-    "INS": "Insecticide",
-    "PGR": "Plant Growth Regulator",
-    "FUM": "Fumigant",
-    "ACR": "Acaricide",
-    "BIO": "Biopesticide",
-    "ROD": "Rodenticide",
-    "NEM": "Nematicide",
-    "mol": "Molluscicide",
-    "synergist": "Synergist",
-    "OTHER": "Other"
-}
-
-# -------------------------------------
-# Filters
-# -------------------------------------
-c1, c2, c3 = st.columns(3)
-
-with c1:
-
-    selected_type_name = st.selectbox(
-        "Chemical Type",
-        list(type_mapping.values()),
-        key="top_type"
+    st.download_button(
+        "Download Comparison Table",
+        csv_compare,
+        "type_comparison.csv",
+        "text/csv"
     )
 
-with c2:
+    ## Part 4 
+    # ==================================================
+    # Top N Chemicals by Type
+    # ==================================================
+    st.divider()
+    st.header("🏆 Top Chemicals by Type")
 
-    year_option = st.selectbox(
-        "Year",
-        ["All Years"] + year_columns,
-        key="top_year"
+    type_mapping = {
+        "HER": "Herbicide",
+        "FUN": "Fungicide",
+        "INS": "Insecticide",
+        "PGR": "Plant Growth Regulator",
+        "FUM": "Fumigant",
+        "ACR": "Acaricide",
+        "BIO": "Biopesticide",
+        "ROD": "Rodenticide",
+        "NEM": "Nematicide",
+        "mol": "Molluscicide",
+        "synergist": "Synergist",
+        "OTHER": "Other"
+    }
+
+    # -------------------------------------
+    # Filters
+    # -------------------------------------
+    c1, c2, c3 = st.columns(3)
+
+    with c1:
+
+        selected_type_name = st.selectbox(
+            "Chemical Type",
+            list(type_mapping.values()),
+            key="top_type"
+        )
+
+    with c2:
+
+        year_option = st.selectbox(
+            "Year",
+            ["All Years"] + year_columns,
+            key="top_year"
+        )
+
+    with c3:
+
+        top_n = st.selectbox(
+            "Top N",
+            [5,10,15,20,25,30],
+            index=1,
+            key="top_n"
+        )
+
+    # -------------------------------------
+    # Convert display name back to code
+    # -------------------------------------
+    reverse_mapping = {v:k for k,v in type_mapping.items()}
+
+    selected_type = reverse_mapping[selected_type_name]
+
+    # -------------------------------------
+    # Filter by type
+    # -------------------------------------
+    df_top = df[df["Type"] == selected_type].copy()
+
+    # -------------------------------------
+    # Calculate value
+    # -------------------------------------
+    if year_option == "All Years":
+
+        df_top["Value"] = df_top[year_columns].sum(axis=1)
+
+    else:
+
+        df_top["Value"] = df_top[year_option]
+
+    # -------------------------------------
+    # Group by Common Name
+    # (Automatically sums all origins,
+    # concentrations and formulations)
+    # -------------------------------------
+    top_table = (
+        df_top
+        .groupby("Common_Name", as_index=False)["Value"]
+        .sum()
     )
 
-with c3:
+    # -------------------------------------
+    # Remove zero imports
+    # -------------------------------------
+    top_table = top_table[
+        top_table["Value"] > 0
+    ]
 
-    top_n = st.selectbox(
-        "Top N",
-        [5,10,15,20,25,30],
-        index=1,
-        key="top_n"
+    # -------------------------------------
+    # Sort
+    # -------------------------------------
+    top_table = (
+        top_table
+        .sort_values("Value", ascending=False)
+        .head(top_n)
+        .reset_index(drop=True)
     )
 
-# -------------------------------------
-# Convert display name back to code
-# -------------------------------------
-reverse_mapping = {v:k for k,v in type_mapping.items()}
+    # -------------------------------------
+    # Ranking
+    # -------------------------------------
+    top_table.index += 1
+    top_table.insert(0, "Rank", top_table.index)
 
-selected_type = reverse_mapping[selected_type_name]
+    # -------------------------------------
+    # Market Share
+    # -------------------------------------
+    grand_total = top_table["Value"].sum()
 
-# -------------------------------------
-# Filter by type
-# -------------------------------------
-df_top = df[df["Type"] == selected_type].copy()
+    top_table["Market Share (%)"] = (
+        top_table["Value"] /
+        grand_total *
+        100
+    ).round(2)
 
-# -------------------------------------
-# Calculate value
-# -------------------------------------
-if year_option == "All Years":
+    # -------------------------------------
+    # KPI
+    # -------------------------------------
+    k1,k2,k3 = st.columns(3)
 
-    df_top["Value"] = df_top[year_columns].sum(axis=1)
+    with k1:
+
+        st.metric(
+            "Top Chemical",
+            top_table.iloc[0]["Common_Name"]
+        )
+
+    with k2:
+
+        st.metric(
+            "Import Volume",
+            f"{top_table.iloc[0]['Value']:,.0f}"
+        )
+
+    with k3:
+
+        st.metric(
+            "Market Share",
+            f"{top_table.iloc[0]['Market Share (%)']:.2f}%"
+        )
+
+    # -------------------------------------
+    # Display
+    # -------------------------------------
+    left,right = st.columns([1,2])
+
+    with left:
+
+        st.subheader("Ranking")
+
+        st.dataframe(
+            top_table,
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+            "Value": st.column_config.NumberColumn(
+                "Import Volume",
+                format="%,.0f"
+            ),
+            "Market Share (%)": st.column_config.NumberColumn(
+                "Market Share (%)",
+                format="%.2f"
+            )
+        }
+        )
+
+    with right:
+
+        fig = px.bar(
+            top_table,
+            x="Value",
+            y="Common_Name",
+            orientation="h",
+            text="Value",
+            title=f"Top {top_n} {selected_type_name}"
+        )
+
+        fig.update_layout(
+            height=650,
+            yaxis=dict(categoryorder="total ascending"),
+            xaxis_title="Import Volume",
+            yaxis_title=""
+        )
+
+        fig.update_traces(
+            texttemplate="%{text:,.0f}",  # <-- Labels on bars
+            textposition="outside",
+            hovertemplate=
+            "<b>%{y}</b><br>"
+            "Import Volume: %{x:,.0f}<extra></extra>"   # <-- Hover
+        )
+
+        st.plotly_chart(
+            fig,
+            use_container_width=True
+        )
+
+    # -------------------------------------
+    # Download
+    # -------------------------------------
+    csv_top = top_table.to_csv(index=False).encode("utf-8")
+
+    st.download_button(
+        "⬇ Download Ranking",
+        csv_top,
+        f"Top_{top_n}_{selected_type_name}.csv",
+        "text/csv"
+    )
 
 else:
+    # ==================================================
+    # Registration Search Page
+    # ==================================================
+    # This page is driven entirely by chemical_registration.xlsx, not
+    # by import volume. That means it also surfaces chemicals that
+    # have a valid, active registration certificate but haven't been
+    # imported (yet) -- which wouldn't show up anywhere on the Import
+    # Volume Dashboard page since that page only lists chemicals that
+    # already appear in chemical_import_2025.xlsx.
 
-    df_top["Value"] = df_top[year_option]
+    st.header("📋 Chemical Registration Search")
 
-# -------------------------------------
-# Group by Common Name
-# (Automatically sums all origins,
-# concentrations and formulations)
-# -------------------------------------
-top_table = (
-    df_top
-    .groupby("Common_Name", as_index=False)["Value"]
-    .sum()
-)
-
-# -------------------------------------
-# Remove zero imports
-# -------------------------------------
-top_table = top_table[
-    top_table["Value"] > 0
-]
-
-# -------------------------------------
-# Sort
-# -------------------------------------
-top_table = (
-    top_table
-    .sort_values("Value", ascending=False)
-    .head(top_n)
-    .reset_index(drop=True)
-)
-
-# -------------------------------------
-# Ranking
-# -------------------------------------
-top_table.index += 1
-top_table.insert(0, "Rank", top_table.index)
-
-# -------------------------------------
-# Market Share
-# -------------------------------------
-grand_total = top_table["Value"].sum()
-
-top_table["Market Share (%)"] = (
-    top_table["Value"] /
-    grand_total *
-    100
-).round(2)
-
-# -------------------------------------
-# KPI
-# -------------------------------------
-k1,k2,k3 = st.columns(3)
-
-with k1:
-
-    st.metric(
-        "Top Chemical",
-        top_table.iloc[0]["Common_Name"]
+    st.write(
+        "Search for a chemical by common name to see every "
+        "**currently active** (non-expired) registration certificate "
+        "for it -- including products that don't yet have any import "
+        "volume."
     )
 
-with k2:
+    st.sidebar.header("Search")
 
-    st.metric(
-        "Import Volume",
-        f"{top_table.iloc[0]['Value']:,.0f}"
+    # --------------------------------------------------
+    # Chemical (type to search -- Streamlit's selectbox
+    # filters the dropdown as you type)
+    # --------------------------------------------------
+
+    reg_common_names = sorted(reg_df["common_name"].dropna().unique())
+
+    if not reg_common_names:
+        st.warning("No chemicals found in the registration data.")
+        st.stop()
+
+    reg_chemical = st.sidebar.selectbox(
+        "Chemical (type to search)",
+        reg_common_names,
+        key="reg_chemical"
     )
 
-with k3:
+    # --------------------------------------------------
+    # Concentration
+    # --------------------------------------------------
 
-    st.metric(
-        "Market Share",
-        f"{top_table.iloc[0]['Market Share (%)']:.2f}%"
+    reg_concentration_options = sorted(
+        reg_df.loc[
+            reg_df["common_name"] == reg_chemical,
+            "concentration"
+        ].dropna().unique()
     )
 
-# -------------------------------------
-# Display
-# -------------------------------------
-left,right = st.columns([1,2])
+    reg_concentration = st.sidebar.selectbox(
+        "Concentration",
+        reg_concentration_options,
+        key="reg_concentration"
+    )
 
-with left:
+    # --------------------------------------------------
+    # Formula Type
+    # --------------------------------------------------
 
-    st.subheader("Ranking")
+    reg_formula_options = sorted(
+        reg_df.loc[
+            (reg_df["common_name"] == reg_chemical) &
+            (reg_df["concentration"] == reg_concentration),
+            "formula_type"
+        ].dropna().unique()
+    )
 
-    st.dataframe(
-        top_table,
-        hide_index=True,
-        use_container_width=True,
-        column_config={
-        "Value": st.column_config.NumberColumn(
-            "Import Volume",
-            format="%,.0f"
-        ),
-        "Market Share (%)": st.column_config.NumberColumn(
-            "Market Share (%)",
-            format="%.2f"
+    reg_formula = st.sidebar.selectbox(
+        "Formula Type",
+        reg_formula_options,
+        key="reg_formula"
+    )
+
+    # ==================================================
+    # Filter -- active (non-expired vs. today) only
+    # ==================================================
+
+    reg_filtered = reg_df[
+        (reg_df["common_name"] == reg_chemical) &
+        (reg_df["concentration"] == reg_concentration) &
+        (reg_df["formula_type"] == reg_formula) &
+        (reg_df["Current_Status"] == "ACTIVE")
+    ]
+
+    # ==================================================
+    # KPI
+    # ==================================================
+
+    k1, k2, k3 = st.columns(3)
+
+    with k1:
+        st.metric("Active Certificates", len(reg_filtered))
+
+    with k2:
+        st.metric(
+            "Distributors",
+            reg_filtered["distributor"].nunique() if not reg_filtered.empty else 0
         )
-    }
-    )
 
-with right:
+    with k3:
+        st.metric(
+            "Applicants",
+            reg_filtered["applicant"].nunique() if not reg_filtered.empty else 0
+        )
 
-    fig = px.bar(
-        top_table,
-        x="Value",
-        y="Common_Name",
-        orientation="h",
-        text="Value",
-        title=f"Top {top_n} {selected_type_name}"
-    )
+    st.divider()
 
-    fig.update_layout(
-        height=650,
-        yaxis=dict(categoryorder="total ascending"),
-        xaxis_title="Import Volume",
-        yaxis_title=""
-    )
+    # ==================================================
+    # Table
+    # ==================================================
 
-    fig.update_traces(
-        texttemplate="%{text:,.0f}",  # <-- Labels on bars
-        textposition="outside",
-        hovertemplate=
-        "<b>%{y}</b><br>"
-        "Import Volume: %{x:,.0f}<extra></extra>"   # <-- Hover
-    )
+    if reg_filtered.empty:
+        st.info(
+            "No active registration certificate found for this "
+            "chemical / concentration / formula combination."
+        )
+    else:
+        display_cols = [
+            "commercial_name",
+            "origin",
+            "applicant",
+            "importer",
+            "distributor",
+            "registration_number",
+            "expiry_date",
+        ]
 
-    st.plotly_chart(
-        fig,
-        use_container_width=True
-    )
+        st.dataframe(
+            reg_filtered[display_cols],
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "expiry_date": st.column_config.DateColumn(
+                    "Expiry Date",
+                    format="DD-MM-YYYY"
+                )
+            }
+        )
 
-# -------------------------------------
-# Download
-# -------------------------------------
-csv_top = top_table.to_csv(index=False).encode("utf-8")
+        # ==================================================
+        # Download
+        # ==================================================
 
-st.download_button(
-    "⬇ Download Ranking",
-    csv_top,
-    f"Top_{top_n}_{selected_type_name}.csv",
-    "text/csv"
-)
+        csv_reg = (
+            reg_filtered[display_cols]
+            .to_csv(index=False)
+            .encode("utf-8")
+        )
+
+        st.download_button(
+            "⬇ Download Registration List",
+            csv_reg,
+            f"{reg_chemical}_{reg_concentration}_{reg_formula}_active_registrations.csv",
+            "text/csv"
+        )
