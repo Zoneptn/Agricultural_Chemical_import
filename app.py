@@ -23,37 +23,48 @@ df = load_data()
 st.title("🧪 Chemical Import Dashboard")
 st.caption("Import volume by chemical, concentration, formulation, and origin country")
 
-# ---------------- Sidebar filters (cascading) ----------------
-st.sidebar.header("Filters")
+# ---------------- Sidebar: reload only ----------------
+st.sidebar.header("Data")
+if st.sidebar.button("🔄 Reload data"):
+    load_data.clear()
+    st.rerun()
+
+# ---------------- Filters (main area, cascading) ----------------
+st.subheader("Filters")
 
 filtered = df.copy()
 
-common_names = sorted(filtered["common_name"].unique())
-sel_names = st.sidebar.multiselect("Chemical (common name)", common_names)
-if sel_names:
-    filtered = filtered[filtered["common_name"].isin(sel_names)]
+row1_col1, row1_col2 = st.columns(2)
+with row1_col1:
+    common_names = sorted(filtered["common_name"].unique())
+    sel_names = st.multiselect("Chemical (common name)", common_names)
+    if sel_names:
+        filtered = filtered[filtered["common_name"].isin(sel_names)]
 
-concentrations = sorted(filtered["concentration"].unique())
-sel_conc = st.sidebar.multiselect("Concentration", concentrations)
-if sel_conc:
-    filtered = filtered[filtered["concentration"].isin(sel_conc)]
+with row1_col2:
+    concentrations = sorted(filtered["concentration"].unique())
+    sel_conc = st.multiselect("Concentration", concentrations)
+    if sel_conc:
+        filtered = filtered[filtered["concentration"].isin(sel_conc)]
 
-formulations = sorted(filtered["formulation_type"].unique())
-sel_form = st.sidebar.multiselect("Formulation type", formulations)
-if sel_form:
-    filtered = filtered[filtered["formulation_type"].isin(sel_form)]
+row2_col1, row2_col2 = st.columns(2)
+with row2_col1:
+    formulations = sorted(filtered["formulation_type"].unique())
+    sel_form = st.multiselect("Formulation type", formulations)
+    if sel_form:
+        filtered = filtered[filtered["formulation_type"].isin(sel_form)]
 
-origins = sorted(filtered["origin"].unique())
-sel_origin = st.sidebar.multiselect("Origin country", origins)
-if sel_origin:
-    filtered = filtered[filtered["origin"].isin(sel_origin)]
+with row2_col2:
+    origins = sorted(filtered["origin"].unique())
+    sel_origin = st.multiselect("Origin country", origins)
+    if sel_origin:
+        filtered = filtered[filtered["origin"].isin(sel_origin)]
 
 year_min, year_max = int(df["year"].min()), int(df["year"].max())
-sel_years = st.sidebar.slider("Year range", year_min, year_max, (year_min, year_max))
+sel_years = st.slider("Year range", year_min, year_max, (year_min, year_max))
 filtered = filtered[(filtered["year"] >= sel_years[0]) & (filtered["year"] <= sel_years[1])]
 
-if st.sidebar.button("Reset filters"):
-    st.rerun()
+st.divider()
 
 # ---------------- Summary metrics ----------------
 c1, c2, c3, c4 = st.columns(4)
@@ -79,17 +90,34 @@ metric_choice = st.radio(
     "Metric", list(metric_labels.keys()), format_func=lambda k: metric_labels[k], horizontal=True
 )
 
-# ---------------- Trend chart ----------------
+# ---------------- Trend chart (line, split by chemical) ----------------
 st.subheader(f"{metric_labels[metric_choice]} by year")
 
+group_cols = ["year", "common_name"] if sel_names else ["year"]
+
 if metric_choice == "price_thb":
-    trend = filtered.groupby("year", as_index=False)["price_thb"].mean()
+    trend = filtered.groupby(group_cols, as_index=False)["price_thb"].mean()
     y_col = "price_thb"
 else:
-    trend = filtered.groupby("year", as_index=False)[metric_choice].sum()
+    trend = filtered.groupby(group_cols, as_index=False)[metric_choice].sum()
     y_col = metric_choice
 
-fig = px.bar(trend, x="year", y=y_col, labels={"year": "Year", y_col: metric_labels[metric_choice]})
+if sel_names:
+    # one or more chemicals picked -> a line per chemical
+    fig = px.line(
+        trend,
+        x="year",
+        y=y_col,
+        color="common_name",
+        markers=True,
+        labels={"year": "Year", y_col: metric_labels[metric_choice], "common_name": "Chemical"},
+    )
+else:
+    # no chemical picked -> single aggregate line (505 chemicals would be unreadable split out)
+    fig = px.line(
+        trend, x="year", y=y_col, markers=True, labels={"year": "Year", y_col: metric_labels[metric_choice]}
+    )
+    st.caption("Pick one or more chemicals above to split this line by chemical.")
 st.plotly_chart(fig, width='stretch')
 
 # ---------------- Breakdown by origin ----------------
