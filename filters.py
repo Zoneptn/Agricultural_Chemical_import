@@ -1,90 +1,177 @@
-"""Cross-linked filter widgets for the Chemical Overview page.
+"""Slot picking, charting, and summary logic for the Chemical Comparison page.
 
-The chemical picker is single-select here on purpose — comparing several
-chemicals side by side lives on the separate Chemical Comparison page.
-Concentration, formulation type, and origin stay multi-select since it's
-normal to want several of those at once for one chemical.
+Each slot picks its own chemical, concentration, formulation type, and origin
+country, with concentration/formulation/country narrowed to that slot's own
+chemical (and narrower picks within the slot) — so two slots can hold the same
+chemical but different variants or origin countries, and be compared directly.
 """
+import pandas as pd
+import plotly.express as px
 import streamlit as st
 
-FILTER_COLS = ["common_name", "concentration", "formulation_type", "origin"]
-FILTER_LABELS = {
-    "common_name": "Chemical (common name)",
-    "concentration": "Concentration",
-    "formulation_type": "Formulation type",
-    "origin": "Origin country",
+from classification import render_classification_expanders
+
+PLACEHOLDER = "— Select —"
+ALL_CONCENTRATIONS = "All concentrations"
+ALL_FORMULATIONS = "All formulation types"
+ALL_COUNTRIES = "All countries"
+MAX_SLOTS = 10
+
+SUMMARY_COLS = {
+    "_label": "Chemical",
+    "total_quantity_kg": "Total quantity (kg)",
+    "total_value_bht": "Total value (THB)",
+    "avg_price_thb_per_kg": "Avg price (THB/kg)",
+    "total_ai_kg": "Total AI (kg)",
+    "origin_countries": "# origin countries",
+    "first_year": "First year",
+    "last_year": "Last year",
 }
-FILTER_KEYS = {c: f"sel_{c}" for c in FILTER_COLS}
-
-ALL_CHEMICALS = "All chemicals"
 
 
-def _current_selection(col):
-    """Current selection for `col` as a list, regardless of whether the widget
-    behind it is the single-select chemical dropdown or a multiselect."""
-    key = FILTER_KEYS[col]
-    if col == "common_name":
-        val = st.session_state.get(key, ALL_CHEMICALS)
-        return [] if val == ALL_CHEMICALS else [val]
-    return st.session_state.get(key, [])
+def _slot_label(spec):
+    """A readable legend/table label: the chemical name, plus whichever of
+    concentration/formulation/country were actually narrowed for this slot."""
+    extras = [v for v in (spec["concentration"], spec["formulation_type"], spec["country"]) if v]
+    return spec["chemical"] if not extras else f"{spec['chemical']} ({', '.join(extras)})"
 
 
-def cross_filter_options(df, col):
-    """Options for `col`, narrowed by every OTHER filter's current selection,
-    so any filter can narrow any other regardless of pick order."""
-    sub = df
-    for other in FILTER_COLS:
-        if other == col:
-            continue
-        other_sel = _current_selection(other)
-        if other_sel:
-            sub = sub[sub[other].isin(other_sel)]
-    return sorted(sub[col].unique())
+def clear_slots():
+    """Resets every slot's picks (up to the max possible, in case the slider
+    was previously higher) back to their defaults by dropping the widget keys."""
+    for slot_idx in range(MAX_SLOTS):
+        for prefix in ("cmp_chem_", "cmp_conc_", "cmp_form_", "cmp_country_"):
+            st.session_state.pop(f"{prefix}{slot_idx}", None)
 
 
-def render_filters(df, slots):
-    """Renders the chemical dropdown (single-select) and the other three
-    filters (multiselect) into `slots` (dict col -> st column), cross-narrowing
-    options against every other filter's current selection. Returns a dict
-    col -> list of selected values (0 or 1 items for common_name)."""
-    sel = {}
-    for col in FILTER_COLS:
-        with slots[col]:
-            opts = cross_filter_options(df, col)
-            key = FILTER_KEYS[col]
+def render_slot_pickers(df, num_chem):
+    """Renders `num_chem` rows, each with 4 dropdowns: chemical, concentration,
+    formulation type, and origin country. The latter three are narrowed to that
+    row's own chemical (and to each other within the row) and default to an
+    "All ..." aggregate option. Returns a de-duplicated list of spec dicts:
+    {"chemical", "concentration", "formulation_type", "country"} — the latter
+    three are None when left on their "All ..." option."""
+    chem_options = [PLACEHOLDER] + sorted(df["common_name"].unique())
 
-            if col == "common_name":
-                choices = [ALL_CHEMICALS] + opts
-                if st.session_state.get(key, ALL_CHEMICALS) not in choices:
-                    st.session_state[key] = ALL_CHEMICALS
-                picked = st.selectbox(FILTER_LABELS[col], choices, key=key)
-                sel[col] = [] if picked == ALL_CHEMICALS else [picked]
-            else:
-                # drop any previously-selected values that no longer apply, so a
-                # tighter set from another filter never crashes the widget
-                if key in st.session_state:
-                    valid = [v for v in st.session_state[key] if v in opts]
-                    if valid != st.session_state[key]:
-                        st.session_state[key] = valid
-                sel[col] = st.multiselect(FILTER_LABELS[col], opts, key=key)
-                if len(opts) == 1:
-                    st.caption(f"Only one {FILTER_LABELS[col].lower()} matches the other filters.")
-    return sel
+    caption_col, clear_col = st.columns([4, 1])
+    with caption_col:
+        st.caption("Each row is one chemical to compare. Leave a field on \"All ...\" to aggregate across it.")
+    with clear_col:
+        if st.button("🧹 Clear all"):
+            clear_slots()
+            st.rerun()
+
+    specs = []
+    for slot_idx in range(num_chem):
+        st.markdown(f"**Chemical {slot_idx + 1}**")
+        c1, c2, c3, c4 = st.columns(4)
+
+        with c1:
+            chem_val = st.selectbox(
+                "Chemical", chem_options, key=f"cmp_chem_{slot_idx}", label_visibility="collapsed"
+            )
+
+        chem_scope = df[df["common_name"] == chem_val] if chem_val != PLACEHOLDER else df.iloc[0:0]
+
+        with c2:
+            conc_opts = [ALL_CONCENTRATIONS] + sorted(chem_scope["concentration"].unique())
+            conc_val = st.selectbox(
+                "Concentration", conc_opts, key=f"cmp_conc_{slot_idx}", label_visibility="collapsed"
+            )
+        conc_scope = chem_scope if conc_val == ALL_CONCENTRATIONS else chem_scope[chem_scope["concentration"] == conc_val]
+
+        with c3:
+            form_opts = [ALL_FORMULATIONS] + sorted(conc_scope["formulation_type"].unique())
+            form_val = st.selectbox(
+                "Formulation type", form_opts, key=f"cmp_form_{slot_idx}", label_visibility="collapsed"
+            )
+        form_scope = conc_scope if form_val == ALL_FORMULATIONS else conc_scope[conc_scope["formulation_type"] == form_val]
+
+        with c4:
+            country_opts = [ALL_COUNTRIES] + sorted(form_scope["origin"].unique())
+            country_val = st.selectbox(
+                "Country", country_opts, key=f"cmp_country_{slot_idx}", label_visibility="collapsed"
+            )
+
+        if chem_val != PLACEHOLDER:
+            specs.append({
+                "chemical": chem_val,
+                "concentration": None if conc_val == ALL_CONCENTRATIONS else conc_val,
+                "formulation_type": None if form_val == ALL_FORMULATIONS else form_val,
+                "country": None if country_val == ALL_COUNTRIES else country_val,
+            })
+
+    # de-duplicate identical specs while preserving pick order
+    seen = set()
+    deduped = []
+    for spec in specs:
+        key = (spec["chemical"], spec["concentration"], spec["formulation_type"], spec["country"])
+        if key not in seen:
+            seen.add(key)
+            deduped.append(spec)
+    return deduped
 
 
-def apply_filters(df, sel, sel_years):
-    """Applies the year range plus every non-empty filter selection to df."""
-    filtered = df[(df["year"] >= sel_years[0]) & (df["year"] <= sel_years[1])]
-    for col in FILTER_COLS:
-        if sel.get(col):
-            filtered = filtered[filtered[col].isin(sel[col])]
-    return filtered
+def build_combined_frame(df, specs):
+    """Builds one dataframe across all specs, tagged with a readable `_label`
+    column per spec for charting/grouping."""
+    frames = []
+    for spec in specs:
+        sub = df[df["common_name"] == spec["chemical"]]
+        if spec["concentration"]:
+            sub = sub[sub["concentration"] == spec["concentration"]]
+        if spec["formulation_type"]:
+            sub = sub[sub["formulation_type"] == spec["formulation_type"]]
+        if spec["country"]:
+            sub = sub[sub["origin"] == spec["country"]]
+        sub = sub.copy()
+        sub["_label"] = _slot_label(spec)
+        frames.append(sub)
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
-def clear_filters(year_min, year_max):
-    """Resets every filter widget back to its default: "All chemicals",
-    empty for the other multiselects, and the full year range."""
-    for col in FILTER_COLS:
-        key = FILTER_KEYS[col]
-        st.session_state[key] = ALL_CHEMICALS if col == "common_name" else []
-    st.session_state["sel_years"] = (year_min, year_max)
+def render_comparison_trend(combined, metric_choice, metric_labels):
+    if metric_choice == "price_thb":
+        trend = combined.groupby(["year", "_label"], as_index=False)[["value_bht", "quantity_kg"]].sum()
+        trend["price_thb"] = trend["value_bht"] / trend["quantity_kg"].replace(0, pd.NA)
+        y_col = "price_thb"
+    else:
+        trend = combined.groupby(["year", "_label"], as_index=False)[metric_choice].sum()
+        y_col = metric_choice
+
+    fig = px.line(
+        trend, x="year", y=y_col, color="_label", markers=True,
+        labels={"year": "Year", y_col: metric_labels[metric_choice], "_label": "Chemical"},
+    )
+    st.plotly_chart(fig, width='stretch')
+
+
+def render_comparison_summary(combined):
+    summary = combined.groupby("_label", as_index=False).agg(
+        total_quantity_kg=("quantity_kg", "sum"),
+        total_value_bht=("value_bht", "sum"),
+        total_ai_kg=("ai_kg", "sum"),
+        origin_countries=("origin", "nunique"),
+        first_year=("year", "min"),
+        last_year=("year", "max"),
+    )
+    summary["avg_price_thb_per_kg"] = summary["total_value_bht"] / summary["total_quantity_kg"].replace(0, pd.NA)
+    summary = summary.rename(columns=SUMMARY_COLS)[list(SUMMARY_COLS.values())]
+    summary = summary.sort_values("Total quantity (kg)", ascending=False)
+
+    st.dataframe(
+        summary.style.format({
+            "Total quantity (kg)": "{:,.0f}",
+            "Total value (THB)": "{:,.0f}",
+            "Avg price (THB/kg)": "{:,.2f}",
+            "Total AI (kg)": "{:,.0f}",
+        }),
+        width='stretch',
+        hide_index=True,
+    )
+
+
+def render_comparison_classification(specs, classification_tables):
+    """Thin wrapper: pull the chemical names out of the specs and hand off to
+    the shared expander-based renderer used by both pages."""
+    render_classification_expanders([spec["chemical"] for spec in specs], classification_tables)
