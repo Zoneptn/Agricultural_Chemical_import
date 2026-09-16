@@ -227,15 +227,29 @@ with tab_data:
 
 # ---------------- Compare chemicals ----------------
 with tab_compare:
-    st.caption("Pick up to 10 chemicals to compare side by side, within the filters set above (concentration/formulation/origin/year).")
+    st.caption("Pick how many chemicals to compare, then choose one per box. Comparisons respect the concentration/formulation/origin/year filters set above.")
 
-    all_names_in_scope = sorted(df["common_name"].unique())
-    compare_sel = st.multiselect(
-        "Chemicals to compare",
-        all_names_in_scope,
-        max_selections=10,
-        key="compare_sel",
-    )
+    num_chem = st.slider("Number of chemicals to compare", min_value=2, max_value=10, value=3, key="compare_num")
+
+    PLACEHOLDER = "— Select —"
+    options_list = [PLACEHOLDER] + sorted(df["common_name"].unique())
+
+    compare_selections = []
+    cols_per_row = 5
+    slot_idx = 0
+    while slot_idx < num_chem:
+        row_cols = st.columns(min(cols_per_row, num_chem - slot_idx))
+        for slot_col in row_cols:
+            with slot_col:
+                val = st.selectbox(f"Chemical {slot_idx + 1}", options_list, key=f"compare_slot_{slot_idx}")
+            if val != PLACEHOLDER:
+                compare_selections.append(val)
+            slot_idx += 1
+
+    # de-duplicate while preserving the order picked, and flag it if it happened
+    compare_sel = list(dict.fromkeys(compare_selections))
+    if len(compare_sel) != len(compare_selections):
+        st.caption("Duplicate picks across boxes are only counted once below.")
 
     if compare_sel:
         # respect the same concentration/formulation/origin/year filters, but swap
