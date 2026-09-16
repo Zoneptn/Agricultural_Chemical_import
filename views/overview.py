@@ -49,6 +49,11 @@ if "sel_years" not in st.session_state:
 sel_years = st.slider("Year range", year_min, year_max, key="sel_years")
 filtered = apply_filters(df, sel, sel_years)
 
+# ---------------- Classification (IRAC / HRAC / FRAC) — always visible ----------------
+st.subheader("🧬 Classification (IRAC / HRAC / FRAC)")
+st.caption("Mode-of-action lookup, matched by chemical name.")
+render_classification_expanders(sel_names, classification_tables)
+
 st.divider()
 
 # ---------------- Summary metrics ----------------
@@ -69,8 +74,8 @@ metric_choice = st.radio(
     "Metric", list(METRIC_LABELS.keys()), format_func=lambda k: METRIC_LABELS[k], horizontal=True
 )
 
-tab_trend, tab_origin, tab_data, tab_reg, tab_class = st.tabs(
-    ["📈 Trend by year", "🌍 By origin country", "📋 Data table", "🗂️ Active registrations", "🧬 Classification"]
+tab_trend, tab_origin, tab_data, tab_reg = st.tabs(
+    ["📈 Trend by year", "🌍 By origin country", "📋 Data table", "🗂️ Active registrations"]
 )
 
 with tab_trend:
@@ -84,7 +89,3 @@ with tab_data:
 
 with tab_reg:
     render_registrations_tab(reg_df, sel_names, sel_conc, sel_form)
-
-with tab_class:
-    st.caption("IRAC (insecticides) / HRAC (herbicides) / FRAC (fungicides) mode-of-action lookup, matched by chemical name.")
-    render_classification_expanders(sel_names, classification_tables)
