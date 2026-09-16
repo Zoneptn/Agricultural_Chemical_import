@@ -1,12 +1,14 @@
 import streamlit as st
 
-from common import load_master_import, load_reg_no, reload_all
+from common import load_master_import, load_reg_no, load_classifications, reload_all
 from filters import render_filters, apply_filters
 from charts import METRIC_LABELS, render_trend_chart, render_origin_chart, render_data_table
 from registrations import render_registrations_tab
+from classification import render_classification_expanders
 
 df = load_master_import()
 reg_df = load_reg_no()
+classification_tables = load_classifications()
 
 st.title("🧪 Chemical Overview")
 st.caption("Import volume by chemical, concentration, formulation, and origin country — plus active registration lookup")
@@ -58,8 +60,8 @@ metric_choice = st.radio(
     "Metric", list(METRIC_LABELS.keys()), format_func=lambda k: METRIC_LABELS[k], horizontal=True
 )
 
-tab_trend, tab_origin, tab_data, tab_reg = st.tabs(
-    ["📈 Trend by year", "🌍 By origin country", "📋 Data table", "🗂️ Active registrations"]
+tab_trend, tab_origin, tab_data, tab_reg, tab_class = st.tabs(
+    ["📈 Trend by year", "🌍 By origin country", "📋 Data table", "🗂️ Active registrations", "🧬 Classification"]
 )
 
 with tab_trend:
@@ -73,3 +75,7 @@ with tab_data:
 
 with tab_reg:
     render_registrations_tab(reg_df, sel_names, sel_conc, sel_form)
+
+with tab_class:
+    st.caption("IRAC (insecticides) / HRAC (herbicides) / FRAC (fungicides) mode-of-action lookup, matched by chemical name.")
+    render_classification_expanders(sel_names, classification_tables)
