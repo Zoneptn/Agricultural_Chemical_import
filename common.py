@@ -1,4 +1,8 @@
-"""Shared data loading and helpers for the Chemical Import Dashboard (multipage app)."""
+"""Data loading and cross-page lookups for the Chemical Import Dashboard.
+
+Everything here is pure data — no widgets, no chart rendering. UI-specific
+logic lives in filters.py, charts.py, registrations.py, and comparison.py.
+"""
 import datetime
 
 import pandas as pd
@@ -73,35 +77,3 @@ def reload_all():
     load_master_import.clear()
     load_reg_no.clear()
     load_classifications.clear()
-
-
-def cross_filter_options(df, col, filter_cols, filter_keys, extra_mask=None):
-    """Options for `col`, narrowed by every OTHER filter's current session_state
-    selection, so any filter can narrow any other regardless of pick order."""
-    sub = df if extra_mask is None else df[extra_mask]
-    for other in filter_cols:
-        if other == col:
-            continue
-        other_sel = st.session_state.get(filter_keys[other], [])
-        if other_sel:
-            sub = sub[sub[other].isin(other_sel)]
-    return sorted(sub[col].unique())
-
-
-def render_cross_filters(df, filter_cols, filter_labels, filter_keys, slots, extra_mask=None):
-    """Renders one multiselect per column in `slots` (a dict col -> st column),
-    cross-narrowing options against every other filter's current selection.
-    Returns a dict col -> selected values."""
-    sel = {}
-    for col in filter_cols:
-        with slots[col]:
-            opts = cross_filter_options(df, col, filter_cols, filter_keys, extra_mask)
-            key = filter_keys[col]
-            if key in st.session_state:
-                valid = [v for v in st.session_state[key] if v in opts]
-                if valid != st.session_state[key]:
-                    st.session_state[key] = valid
-            sel[col] = st.multiselect(filter_labels[col], opts, key=key)
-            if len(opts) == 1:
-                st.caption(f"Only one {filter_labels[col].lower()} matches the other filters.")
-    return sel
