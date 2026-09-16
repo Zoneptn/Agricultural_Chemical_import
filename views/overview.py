@@ -2,7 +2,7 @@ import streamlit as st
 
 from common import load_master_import, load_reg_no, load_classifications, reload_all
 from filters import render_filters, apply_filters, clear_filters
-from charts import METRIC_LABELS, render_trend_chart, render_origin_chart, render_data_table
+from charts import render_trend_chart, render_origin_chart, render_data_table
 from registrations import filter_active_registrations, render_registrations_tab
 from classification import render_classification_expanders
 
@@ -78,20 +78,15 @@ if filtered.empty:
     st.warning("No import data matches the current filters.")
     st.stop()
 
-# ---------------- Metric choice for chart ----------------
-metric_choice = st.radio(
-    "Metric", list(METRIC_LABELS.keys()), format_func=lambda k: METRIC_LABELS[k], horizontal=True
-)
-
 tab_trend, tab_origin, tab_data, tab_reg = st.tabs(
     ["📈 Trend by year", "🌍 By origin country", "📋 Data table", "🗂️ Active registrations"]
 )
 
 with tab_trend:
-    render_trend_chart(filtered, sel_names, metric_choice)
+    render_trend_chart(filtered, sel_names)
 
 with tab_origin:
-    render_origin_chart(filtered, metric_choice)
+    render_origin_chart(filtered)
 
 with tab_data:
     render_data_table(filtered)
