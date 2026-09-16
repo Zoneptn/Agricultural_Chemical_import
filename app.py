@@ -1,69 +1,29 @@
-import streamlit as st
 import pandas as pd
 import plotly.express as px
+import streamlit as st
 
-st.set_page_config(page_title="Chemical Import Dashboard", layout="wide")
+from common import (
+    load_master_import,
+    load_reg_no,
+    load_classifications,
+    reload_all,
+    not_expired,
+    render_cross_filters,
+)
 
-DATA_PATH = "chemical_import_database.xlsx"
+st.set_page_config(page_title="Chemical Overview", layout="wide")
 
-
-@st.cache_data
-def load_data():
-    df = pd.read_excel(DATA_PATH, sheet_name="master_import")
-    # normalize text columns for reliable filtering (fillna BEFORE astype(str),
-    # since pyarrow-backed string columns keep NaN as float, not the string "nan")
-    df["formulation_type"] = df["formulation_type"].fillna("Unspecified")
-    for col in ["common_name", "concentration", "formulation_type", "origin"]:
-        df[col] = df[col].astype(str).str.strip()
-    return df
-
-
-@st.cache_data
-def load_classifications():
-    """IRAC (insecticides), HRAC (herbicides), FRAC (fungicides) mode-of-action
-    tables, keyed by a normalized common_name for lookup."""
-    tables = {}
-    for system in ["irac", "hrac", "frac"]:
-        sub = pd.read_excel(DATA_PATH, sheet_name=system)
-        sub["_norm_name"] = sub["common_name"].astype(str).str.strip().str.lower()
-        tables[system.upper()] = sub
-    return tables
-
-
-def classify_chemical(common_name, tables):
-    """Look up a common_name (splitting on '+' for mixtures) against all three
-    mode-of-action systems. Returns a list of dict rows, one per component/system hit."""
-    rows = []
-    for component in str(common_name).split("+"):
-        comp_norm = component.strip().lower()
-        if not comp_norm:
-            continue
-        for system, tbl in tables.items():
-            hits = tbl[tbl["_norm_name"] == comp_norm]
-            for _, hit in hits.iterrows():
-                row = {
-                    "Component": component.strip(),
-                    "System": system,
-                    "Physiological category": hit.get("physiological_category", ""),
-                    "Mode of action": hit.get("mode_of_action", ""),
-                    "Chemical class/group": hit.get("chemical_class", hit.get("chemical_group", "")),
-                    "Code": str(hit.get("code", "")),
-                }
-                rows.append(row)
-    return rows
-
-
-df = load_data()
+df = load_master_import()
+reg_df = load_reg_no()
 classification_tables = load_classifications()
 
-st.title("🧪 Chemical Import Dashboard")
-st.caption("Import volume by chemical, concentration, formulation, and origin country")
+st.title("🧪 Chemical Overview")
+st.caption("Import volume by chemical, concentration, formulation, and origin country — plus active registration lookup")
 
 # ---------------- Sidebar: reload only ----------------
 st.sidebar.header("Data")
 if st.sidebar.button("🔄 Reload data"):
-    load_data.clear()
-    load_classifications.clear()
+    reload_all()
     st.rerun()
 
 # ---------------- Filters (main area, fully cross-linked) ----------------
@@ -79,23 +39,7 @@ FILTER_LABELS = {
 FILTER_KEYS = {c: f"sel_{c}" for c in FILTER_COLS}
 
 year_min, year_max = int(df["year"].min()), int(df["year"].max())
-year_range_current = st.session_state.get("sel_years", (year_min, year_max))
 
-
-def options_for(col):
-    """Options for `col`, narrowed by every OTHER filter's current selection
-    (plus the year range) so any filter can narrow any other, in any order."""
-    sub = df[(df["year"] >= year_range_current[0]) & (df["year"] <= year_range_current[1])]
-    for other in FILTER_COLS:
-        if other == col:
-            continue
-        other_sel = st.session_state.get(FILTER_KEYS[other], [])
-        if other_sel:
-            sub = sub[sub[other].isin(other_sel)]
-    return sorted(sub[col].unique())
-
-
-sel = {}
 row1_col1, row1_col2 = st.columns(2)
 row2_col1, row2_col2 = st.columns(2)
 slots = {
@@ -104,20 +48,7 @@ slots = {
     "formulation_type": row2_col1,
     "origin": row2_col2,
 }
-
-for col in FILTER_COLS:
-    with slots[col]:
-        opts = options_for(col)
-        key = FILTER_KEYS[col]
-        # drop any previously-selected values that no longer apply, so a
-        # tighter set from another filter never crashes the widget
-        if key in st.session_state:
-            valid = [v for v in st.session_state[key] if v in opts]
-            if valid != st.session_state[key]:
-                st.session_state[key] = valid
-        sel[col] = st.multiselect(FILTER_LABELS[col], opts, key=key)
-        if len(opts) == 1:
-            st.caption(f"Only one {FILTER_LABELS[col].lower()} matches the other filters.")
+sel = render_cross_filters(df, FILTER_COLS, FILTER_LABELS, FILTER_KEYS, slots)
 
 sel_names = sel["common_name"]
 sel_conc = sel["concentration"]
@@ -148,7 +79,7 @@ c4.metric("Total active ingredient (kg)", f"{filtered['ai_kg'].sum():,.0f}")
 st.divider()
 
 if filtered.empty:
-    st.warning("No data matches the current filters.")
+    st.warning("No import data matches the current filters.")
     st.stop()
 
 # ---------------- Metric choice for chart ----------------
@@ -162,8 +93,8 @@ metric_choice = st.radio(
     "Metric", list(metric_labels.keys()), format_func=lambda k: metric_labels[k], horizontal=True
 )
 
-tab_trend, tab_origin, tab_data, tab_compare = st.tabs(
-    ["📈 Trend by year", "🌍 By origin country", "📋 Data table", "🔬 Compare chemicals"]
+tab_trend, tab_origin, tab_data, tab_reg = st.tabs(
+    ["📈 Trend by year", "🌍 By origin country", "📋 Data table", "🗂️ Active registrations"]
 )
 
 # ---------------- Trend chart (line, split by chemical) ----------------
@@ -179,17 +110,11 @@ with tab_trend:
         y_col = metric_choice
 
     if sel_names:
-        # one or more chemicals picked -> a line per chemical
         fig = px.line(
-            trend,
-            x="year",
-            y=y_col,
-            color="common_name",
-            markers=True,
+            trend, x="year", y=y_col, color="common_name", markers=True,
             labels={"year": "Year", y_col: metric_labels[metric_choice], "common_name": "Chemical"},
         )
     else:
-        # no chemical picked -> single aggregate line (505 chemicals would be unreadable split out)
         fig = px.line(
             trend, x="year", y=y_col, markers=True, labels={"year": "Year", y_col: metric_labels[metric_choice]}
         )
@@ -206,10 +131,7 @@ with tab_origin:
     by_origin = by_origin.sort_values(metric_choice, ascending=False).head(15)
 
     fig2 = px.bar(
-        by_origin,
-        x=metric_choice,
-        y="origin",
-        orientation="h",
+        by_origin, x=metric_choice, y="origin", orientation="h",
         labels={metric_choice: metric_labels[metric_choice], "origin": "Origin"},
     )
     fig2.update_layout(yaxis={"categoryorder": "total ascending"})
@@ -225,106 +147,47 @@ with tab_data:
         "text/csv",
     )
 
-# ---------------- Compare chemicals ----------------
-with tab_compare:
-    st.caption("Pick how many chemicals to compare, then choose one per box. Comparisons respect the concentration/formulation/origin/year filters set above.")
+# ---------------- Active registrations (joined from reg_no) ----------------
+with tab_reg:
+    st.caption(
+        "Matched from the reg_no sheet by chemical name (and concentration/formulation type, "
+        "when selected above). Origin country isn't tracked in reg_no, so it isn't used to filter "
+        "this table. Only registrations that are not expired are shown."
+    )
 
-    num_chem = st.slider("Number of chemicals to compare", min_value=2, max_value=10, value=3, key="compare_num")
+    reg_view = not_expired(reg_df)
+    if sel_names:
+        reg_view = reg_view[reg_view["common_name"].str.lower().isin([n.lower() for n in sel_names])]
+    if sel_conc:
+        reg_view = reg_view[reg_view["concentration"].str.lower().isin([c.lower() for c in sel_conc])]
+    if sel_form:
+        reg_view = reg_view[reg_view["formulation_type"].str.lower().isin([f.lower() for f in sel_form])]
 
-    PLACEHOLDER = "— Select —"
-    options_list = [PLACEHOLDER] + sorted(df["common_name"].unique())
+    if not sel_names:
+        st.info("Pick a chemical above to narrow this list — showing all active registrations otherwise.")
 
-    compare_selections = []
-    cols_per_row = 5
-    slot_idx = 0
-    while slot_idx < num_chem:
-        row_cols = st.columns(min(cols_per_row, num_chem - slot_idx))
-        for slot_col in row_cols:
-            with slot_col:
-                val = st.selectbox(f"Chemical {slot_idx + 1}", options_list, key=f"compare_slot_{slot_idx}")
-            if val != PLACEHOLDER:
-                compare_selections.append(val)
-            slot_idx += 1
-
-    # de-duplicate while preserving the order picked, and flag it if it happened
-    compare_sel = list(dict.fromkeys(compare_selections))
-    if len(compare_sel) != len(compare_selections):
-        st.caption("Duplicate picks across boxes are only counted once below.")
-
-    if compare_sel:
-        # respect the same concentration/formulation/origin/year filters, but swap
-        # in the comparison selection for the chemical dimension
-        compare_base = df[(df["year"] >= sel_years[0]) & (df["year"] <= sel_years[1])]
-        if sel_conc:
-            compare_base = compare_base[compare_base["concentration"].isin(sel_conc)]
-        if sel_form:
-            compare_base = compare_base[compare_base["formulation_type"].isin(sel_form)]
-        if sel_origin:
-            compare_base = compare_base[compare_base["origin"].isin(sel_origin)]
-        compare_base = compare_base[compare_base["common_name"].isin(compare_sel)]
-
-        if compare_base.empty:
-            st.warning("None of the selected chemicals have data under the current concentration/formulation/origin/year filters.")
-        else:
-            summary = compare_base.groupby("common_name", as_index=False).agg(
-                total_quantity_kg=("quantity_kg", "sum"),
-                total_value_bht=("value_bht", "sum"),
-                total_ai_kg=("ai_kg", "sum"),
-                origin_countries=("origin", "nunique"),
-                first_year=("year", "min"),
-                last_year=("year", "max"),
-            )
-            summary["avg_price_thb_per_kg"] = summary["total_value_bht"] / summary["total_quantity_kg"].replace(0, pd.NA)
-            summary = summary.rename(columns={
-                "common_name": "Chemical",
-                "total_quantity_kg": "Total quantity (kg)",
-                "total_value_bht": "Total value (THB)",
-                "avg_price_thb_per_kg": "Avg price (THB/kg)",
-                "total_ai_kg": "Total AI (kg)",
-                "origin_countries": "# origin countries",
-                "first_year": "First year",
-                "last_year": "Last year",
-            })
-            summary = summary[[
-                "Chemical", "Total quantity (kg)", "Total value (THB)", "Avg price (THB/kg)",
-                "Total AI (kg)", "# origin countries", "First year", "Last year",
-            ]].sort_values("Total quantity (kg)", ascending=False)
-
-            st.dataframe(
-                summary.style.format({
-                    "Total quantity (kg)": "{:,.0f}",
-                    "Total value (THB)": "{:,.0f}",
-                    "Avg price (THB/kg)": "{:,.2f}",
-                    "Total AI (kg)": "{:,.0f}",
-                }),
-                width='stretch',
-                hide_index=True,
-            )
-
-            # quick visual comparison alongside the table
-            cmp_fig = px.bar(
-                summary,
-                x="Chemical",
-                y="Total quantity (kg)",
-                labels={"Chemical": "Chemical", "Total quantity (kg)": "Total quantity (kg)"},
-            )
-            st.plotly_chart(cmp_fig, width='stretch')
-
-            # ---- IRAC / HRAC / FRAC classification, shown as detail only ----
-            st.markdown("**Classification detail (IRAC / HRAC / FRAC)**")
-            detail_rows = []
-            for name in compare_sel:
-                hits = classify_chemical(name, classification_tables)
-                if hits:
-                    for h in hits:
-                        detail_rows.append({"Chemical": name, **h})
-                else:
-                    detail_rows.append({
-                        "Chemical": name, "Component": "", "System": "—",
-                        "Physiological category": "No IRAC/HRAC/FRAC match found",
-                        "Mode of action": "", "Chemical class/group": "", "Code": "",
-                    })
-            detail_df = pd.DataFrame(detail_rows)
-            st.dataframe(detail_df, width='stretch', hide_index=True)
+    if reg_view.empty:
+        st.warning("No active (non-expired) registrations match the current chemical/concentration/formulation filters.")
     else:
-        st.info("Select chemicals above to compare them.")
+        display_cols = {
+            "common_name": "Chemical",
+            "concentration": "Concentration",
+            "formulation_type": "Formulation type",
+            "trade_name": "Trade name",
+            "source": "Source",
+            "register": "Register",
+            "distributor": "Distributor",
+            "expire": "Expires",
+        }
+        st.dataframe(
+            reg_view[list(display_cols.keys())].rename(columns=display_cols).sort_values("Chemical"),
+            width='stretch',
+            hide_index=True,
+        )
+        st.caption(f"{len(reg_view):,} active registration(s) matched.")
+        st.download_button(
+            "Download active registrations as CSV",
+            reg_view[list(display_cols.keys())].rename(columns=display_cols).to_csv(index=False).encode("utf-8"),
+            "active_registrations.csv",
+            "text/csv",
+        )
