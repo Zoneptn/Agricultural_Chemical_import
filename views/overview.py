@@ -3,7 +3,7 @@ import streamlit as st
 from common import load_master_import, load_reg_no, load_classifications, reload_all
 from filters import render_filters, apply_filters, clear_filters
 from charts import METRIC_LABELS, render_trend_chart, render_origin_chart, render_data_table
-from registrations import render_registrations_tab
+from registrations import filter_active_registrations, render_registrations_tab
 from classification import render_classification_expanders
 
 df = load_master_import()
@@ -56,6 +56,15 @@ render_classification_expanders(sel_names, classification_tables)
 
 st.divider()
 
+# ---------------- Active registrations summary — always visible ----------------
+reg_view = filter_active_registrations(reg_df, sel_names, sel_conc, sel_form)
+reg_c1, reg_c2 = st.columns(2)
+reg_c1.metric("Active registrations", f"{len(reg_view):,}")
+reg_c2.metric("Unique distributors", f"{reg_view['distributor'].nunique():,}")
+st.caption("Full detail — trade name, source, register, distributor — is in the \"Active registrations\" tab below.")
+
+st.divider()
+
 # ---------------- Summary metrics ----------------
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Matching rows", f"{len(filtered):,}")
@@ -88,4 +97,4 @@ with tab_data:
     render_data_table(filtered)
 
 with tab_reg:
-    render_registrations_tab(reg_df, sel_names, sel_conc, sel_form)
+    render_registrations_tab(reg_view, sel_names)
