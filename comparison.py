@@ -9,7 +9,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from common import classify_by_component
+from classification import render_classification_expanders
 
 PLACEHOLDER = "— Select —"
 ALL_CONCENTRATIONS = "All concentrations"
@@ -157,24 +157,6 @@ def render_comparison_summary(combined):
 
 
 def render_comparison_classification(specs, classification_tables):
-    """One expander per unique chemical, so a mixture's several components
-    (and each component's potentially long, bilingual mode-of-action text)
-    get room to read instead of being crammed into wide table cells."""
-    unique_chems = list(dict.fromkeys(spec["chemical"] for spec in specs))
-    for name in unique_chems:
-        breakdown = classify_by_component(name, classification_tables)
-        with st.expander(name, expanded=(len(unique_chems) == 1)):
-            for entry in breakdown:
-                is_mixture = len(breakdown) > 1
-                if is_mixture:
-                    st.markdown(f"**Component: {entry['component']}**")
-                if not entry["matches"]:
-                    st.caption("No IRAC/HRAC/FRAC match found for this component.")
-                else:
-                    for m in entry["matches"]:
-                        st.markdown(f"**{m['system']}** — Code {m['code']}")
-                        st.markdown(f"- Physiological category: {m['physiological_category']}")
-                        st.markdown(f"- Mode of action: {m['mode_of_action']}")
-                        st.markdown(f"- Chemical class/group: {m['chemical_class_group']}")
-                if is_mixture and entry is not breakdown[-1]:
-                    st.divider()
+    """Thin wrapper: pull the chemical names out of the specs and hand off to
+    the shared expander-based renderer used by both pages."""
+    render_classification_expanders([spec["chemical"] for spec in specs], classification_tables)
