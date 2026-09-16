@@ -43,27 +43,33 @@ def load_classifications():
     return tables
 
 
-def classify_chemical(common_name, tables):
-    """Look up a common_name (splitting on '+' for mixtures) against all three
-    mode-of-action systems. Returns a list of dict rows, one per component/system hit."""
-    rows = []
+def classify_by_component(common_name, tables):
+    """Splits a common_name on '+' (mixtures list multiple active ingredients
+    this way) and looks up each component against all three mode-of-action
+    systems. Returns one entry per component, in order, even when a component
+    has no match — so a 3-way mixture never silently drops a component:
+        [{"component": "tebuconazole", "matches": [{"system": "FRAC", ...}]},
+         {"component": "azoxystrobin", "matches": [{"system": "FRAC", ...}]}]
+    """
+    breakdown = []
     for component in str(common_name).split("+"):
-        comp_norm = component.strip().lower()
+        comp_stripped = component.strip()
+        comp_norm = comp_stripped.lower()
         if not comp_norm:
             continue
+        matches = []
         for system, tbl in tables.items():
             hits = tbl[tbl["_norm_name"] == comp_norm]
             for _, hit in hits.iterrows():
-                row = {
-                    "Component": component.strip(),
-                    "System": system,
-                    "Physiological category": hit.get("physiological_category", ""),
-                    "Mode of action": hit.get("mode_of_action", ""),
-                    "Chemical class/group": hit.get("chemical_class", hit.get("chemical_group", "")),
-                    "Code": str(hit.get("code", "")),
-                }
-                rows.append(row)
-    return rows
+                matches.append({
+                    "system": system,
+                    "physiological_category": hit.get("physiological_category", ""),
+                    "mode_of_action": hit.get("mode_of_action", ""),
+                    "chemical_class_group": hit.get("chemical_class", hit.get("chemical_group", "")),
+                    "code": str(hit.get("code", "")),
+                })
+        breakdown.append({"component": comp_stripped, "matches": matches})
+    return breakdown
 
 
 def not_expired(reg_df):
