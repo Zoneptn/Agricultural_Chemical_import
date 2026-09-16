@@ -37,10 +37,17 @@ def filter_active_registrations(reg_df, sel_names, sel_conc, sel_form):
 SEARCH_TEXT_COLS = ["reg_no", "trade_name", "common_name_original", "distributor", "importer"]
 
 
-def search_registrations(reg_df, query, categories, names, concs, forms, active_only):
+def issued_date_bounds(reg_df):
+    """Min/max issued date in the data, as plain date objects for a date_input."""
+    valid = reg_df["issued"].dropna()
+    return valid.min().date(), valid.max().date()
+
+
+def search_registrations(reg_df, query, categories, names, concs, forms, distributors, issued_from, issued_to, active_only):
     """General-purpose registration search: free-text across reg_no/trade
     name/original name/distributor/importer, plus dropdown filters for
-    category, chemical, concentration, and formulation type."""
+    category, chemical, concentration, formulation type, and distributor,
+    plus an issued-date range."""
     view = not_expired(reg_df) if active_only else reg_df
 
     if query and query.strip():
@@ -58,6 +65,14 @@ def search_registrations(reg_df, query, categories, names, concs, forms, active_
         view = view[view["concentration"].str.lower().isin([c.lower() for c in concs])]
     if forms:
         view = view[view["formulation_type"].str.lower().isin([f.lower() for f in forms])]
+    if distributors:
+        view = view[view["distributor"].isin(distributors)]
+
+    if issued_from and issued_to:
+        issued_date = view["issued"].dt.date
+        # registrations with no issued date on record are kept regardless of
+        # the range — we can't disprove they belong in it
+        view = view[issued_date.isna() | ((issued_date >= issued_from) & (issued_date <= issued_to))]
 
     return view
 
