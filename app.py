@@ -162,59 +162,61 @@ metric_choice = st.radio(
     "Metric", list(metric_labels.keys()), format_func=lambda k: metric_labels[k], horizontal=True
 )
 
+tab_trend, tab_origin, tab_data, tab_compare = st.tabs(
+    ["📈 Trend by year", "🌍 By origin country", "📋 Data table", "🔬 Compare chemicals"]
+)
+
 # ---------------- Trend chart (line, split by chemical) ----------------
-st.subheader(f"{metric_labels[metric_choice]} by year")
+with tab_trend:
+    group_cols = ["year", "common_name"] if sel_names else ["year"]
 
-group_cols = ["year", "common_name"] if sel_names else ["year"]
+    if metric_choice == "price_thb":
+        trend = filtered.groupby(group_cols, as_index=False)[["value_bht", "quantity_kg"]].sum()
+        trend["price_thb"] = trend["value_bht"] / trend["quantity_kg"].replace(0, pd.NA)
+        y_col = "price_thb"
+    else:
+        trend = filtered.groupby(group_cols, as_index=False)[metric_choice].sum()
+        y_col = metric_choice
 
-if metric_choice == "price_thb":
-    trend = filtered.groupby(group_cols, as_index=False)[["value_bht", "quantity_kg"]].sum()
-    trend["price_thb"] = trend["value_bht"] / trend["quantity_kg"].replace(0, pd.NA)
-    y_col = "price_thb"
-else:
-    trend = filtered.groupby(group_cols, as_index=False)[metric_choice].sum()
-    y_col = metric_choice
-
-if sel_names:
-    # one or more chemicals picked -> a line per chemical
-    fig = px.line(
-        trend,
-        x="year",
-        y=y_col,
-        color="common_name",
-        markers=True,
-        labels={"year": "Year", y_col: metric_labels[metric_choice], "common_name": "Chemical"},
-    )
-else:
-    # no chemical picked -> single aggregate line (505 chemicals would be unreadable split out)
-    fig = px.line(
-        trend, x="year", y=y_col, markers=True, labels={"year": "Year", y_col: metric_labels[metric_choice]}
-    )
-    st.caption("Pick one or more chemicals above to split this line by chemical.")
-st.plotly_chart(fig, width='stretch')
+    if sel_names:
+        # one or more chemicals picked -> a line per chemical
+        fig = px.line(
+            trend,
+            x="year",
+            y=y_col,
+            color="common_name",
+            markers=True,
+            labels={"year": "Year", y_col: metric_labels[metric_choice], "common_name": "Chemical"},
+        )
+    else:
+        # no chemical picked -> single aggregate line (505 chemicals would be unreadable split out)
+        fig = px.line(
+            trend, x="year", y=y_col, markers=True, labels={"year": "Year", y_col: metric_labels[metric_choice]}
+        )
+        st.caption("Pick one or more chemicals above to split this line by chemical.")
+    st.plotly_chart(fig, width='stretch')
 
 # ---------------- Breakdown by origin ----------------
-st.subheader(f"{metric_labels[metric_choice]} by origin country")
+with tab_origin:
+    if metric_choice == "price_thb":
+        by_origin = filtered.groupby("origin", as_index=False)[["value_bht", "quantity_kg"]].sum()
+        by_origin["price_thb"] = by_origin["value_bht"] / by_origin["quantity_kg"].replace(0, pd.NA)
+    else:
+        by_origin = filtered.groupby("origin", as_index=False)[metric_choice].sum()
+    by_origin = by_origin.sort_values(metric_choice, ascending=False).head(15)
 
-if metric_choice == "price_thb":
-    by_origin = filtered.groupby("origin", as_index=False)[["value_bht", "quantity_kg"]].sum()
-    by_origin["price_thb"] = by_origin["value_bht"] / by_origin["quantity_kg"].replace(0, pd.NA)
-else:
-    by_origin = filtered.groupby("origin", as_index=False)[metric_choice].sum()
-by_origin = by_origin.sort_values(metric_choice, ascending=False).head(15)
-
-fig2 = px.bar(
-    by_origin,
-    x=metric_choice,
-    y="origin",
-    orientation="h",
-    labels={metric_choice: metric_labels[metric_choice], "origin": "Origin"},
-)
-fig2.update_layout(yaxis={"categoryorder": "total ascending"})
-st.plotly_chart(fig2, width='stretch')
+    fig2 = px.bar(
+        by_origin,
+        x=metric_choice,
+        y="origin",
+        orientation="h",
+        labels={metric_choice: metric_labels[metric_choice], "origin": "Origin"},
+    )
+    fig2.update_layout(yaxis={"categoryorder": "total ascending"})
+    st.plotly_chart(fig2, width='stretch')
 
 # ---------------- Data table ----------------
-with st.expander("View filtered data"):
+with tab_data:
     st.dataframe(filtered.sort_values("year", ascending=False), width='stretch')
     st.download_button(
         "Download filtered data as CSV",
@@ -224,92 +226,91 @@ with st.expander("View filtered data"):
     )
 
 # ---------------- Compare chemicals ----------------
-st.divider()
-st.subheader("Compare chemicals")
-st.caption("Pick up to 10 chemicals to compare side by side, within the filters set above (concentration/formulation/origin/year).")
+with tab_compare:
+    st.caption("Pick up to 10 chemicals to compare side by side, within the filters set above (concentration/formulation/origin/year).")
 
-all_names_in_scope = sorted(df["common_name"].unique())
-compare_sel = st.multiselect(
-    "Chemicals to compare",
-    all_names_in_scope,
-    max_selections=10,
-    key="compare_sel",
-)
+    all_names_in_scope = sorted(df["common_name"].unique())
+    compare_sel = st.multiselect(
+        "Chemicals to compare",
+        all_names_in_scope,
+        max_selections=10,
+        key="compare_sel",
+    )
 
-if compare_sel:
-    # respect the same concentration/formulation/origin/year filters, but swap
-    # in the comparison selection for the chemical dimension
-    compare_base = df[(df["year"] >= sel_years[0]) & (df["year"] <= sel_years[1])]
-    if sel_conc:
-        compare_base = compare_base[compare_base["concentration"].isin(sel_conc)]
-    if sel_form:
-        compare_base = compare_base[compare_base["formulation_type"].isin(sel_form)]
-    if sel_origin:
-        compare_base = compare_base[compare_base["origin"].isin(sel_origin)]
-    compare_base = compare_base[compare_base["common_name"].isin(compare_sel)]
+    if compare_sel:
+        # respect the same concentration/formulation/origin/year filters, but swap
+        # in the comparison selection for the chemical dimension
+        compare_base = df[(df["year"] >= sel_years[0]) & (df["year"] <= sel_years[1])]
+        if sel_conc:
+            compare_base = compare_base[compare_base["concentration"].isin(sel_conc)]
+        if sel_form:
+            compare_base = compare_base[compare_base["formulation_type"].isin(sel_form)]
+        if sel_origin:
+            compare_base = compare_base[compare_base["origin"].isin(sel_origin)]
+        compare_base = compare_base[compare_base["common_name"].isin(compare_sel)]
 
-    if compare_base.empty:
-        st.warning("None of the selected chemicals have data under the current concentration/formulation/origin/year filters.")
+        if compare_base.empty:
+            st.warning("None of the selected chemicals have data under the current concentration/formulation/origin/year filters.")
+        else:
+            summary = compare_base.groupby("common_name", as_index=False).agg(
+                total_quantity_kg=("quantity_kg", "sum"),
+                total_value_bht=("value_bht", "sum"),
+                total_ai_kg=("ai_kg", "sum"),
+                origin_countries=("origin", "nunique"),
+                first_year=("year", "min"),
+                last_year=("year", "max"),
+            )
+            summary["avg_price_thb_per_kg"] = summary["total_value_bht"] / summary["total_quantity_kg"].replace(0, pd.NA)
+            summary = summary.rename(columns={
+                "common_name": "Chemical",
+                "total_quantity_kg": "Total quantity (kg)",
+                "total_value_bht": "Total value (THB)",
+                "avg_price_thb_per_kg": "Avg price (THB/kg)",
+                "total_ai_kg": "Total AI (kg)",
+                "origin_countries": "# origin countries",
+                "first_year": "First year",
+                "last_year": "Last year",
+            })
+            summary = summary[[
+                "Chemical", "Total quantity (kg)", "Total value (THB)", "Avg price (THB/kg)",
+                "Total AI (kg)", "# origin countries", "First year", "Last year",
+            ]].sort_values("Total quantity (kg)", ascending=False)
+
+            st.dataframe(
+                summary.style.format({
+                    "Total quantity (kg)": "{:,.0f}",
+                    "Total value (THB)": "{:,.0f}",
+                    "Avg price (THB/kg)": "{:,.2f}",
+                    "Total AI (kg)": "{:,.0f}",
+                }),
+                width='stretch',
+                hide_index=True,
+            )
+
+            # quick visual comparison alongside the table
+            cmp_fig = px.bar(
+                summary,
+                x="Chemical",
+                y="Total quantity (kg)",
+                labels={"Chemical": "Chemical", "Total quantity (kg)": "Total quantity (kg)"},
+            )
+            st.plotly_chart(cmp_fig, width='stretch')
+
+            # ---- IRAC / HRAC / FRAC classification, shown as detail only ----
+            st.markdown("**Classification detail (IRAC / HRAC / FRAC)**")
+            detail_rows = []
+            for name in compare_sel:
+                hits = classify_chemical(name, classification_tables)
+                if hits:
+                    for h in hits:
+                        detail_rows.append({"Chemical": name, **h})
+                else:
+                    detail_rows.append({
+                        "Chemical": name, "Component": "", "System": "—",
+                        "Physiological category": "No IRAC/HRAC/FRAC match found",
+                        "Mode of action": "", "Chemical class/group": "", "Code": "",
+                    })
+            detail_df = pd.DataFrame(detail_rows)
+            st.dataframe(detail_df, width='stretch', hide_index=True)
     else:
-        summary = compare_base.groupby("common_name", as_index=False).agg(
-            total_quantity_kg=("quantity_kg", "sum"),
-            total_value_bht=("value_bht", "sum"),
-            total_ai_kg=("ai_kg", "sum"),
-            origin_countries=("origin", "nunique"),
-            first_year=("year", "min"),
-            last_year=("year", "max"),
-        )
-        summary["avg_price_thb_per_kg"] = summary["total_value_bht"] / summary["total_quantity_kg"].replace(0, pd.NA)
-        summary = summary.rename(columns={
-            "common_name": "Chemical",
-            "total_quantity_kg": "Total quantity (kg)",
-            "total_value_bht": "Total value (THB)",
-            "avg_price_thb_per_kg": "Avg price (THB/kg)",
-            "total_ai_kg": "Total AI (kg)",
-            "origin_countries": "# origin countries",
-            "first_year": "First year",
-            "last_year": "Last year",
-        })
-        summary = summary[[
-            "Chemical", "Total quantity (kg)", "Total value (THB)", "Avg price (THB/kg)",
-            "Total AI (kg)", "# origin countries", "First year", "Last year",
-        ]].sort_values("Total quantity (kg)", ascending=False)
-
-        st.dataframe(
-            summary.style.format({
-                "Total quantity (kg)": "{:,.0f}",
-                "Total value (THB)": "{:,.0f}",
-                "Avg price (THB/kg)": "{:,.2f}",
-                "Total AI (kg)": "{:,.0f}",
-            }),
-            width='stretch',
-            hide_index=True,
-        )
-
-        # quick visual comparison alongside the table
-        cmp_fig = px.bar(
-            summary,
-            x="Chemical",
-            y="Total quantity (kg)",
-            labels={"Chemical": "Chemical", "Total quantity (kg)": "Total quantity (kg)"},
-        )
-        st.plotly_chart(cmp_fig, width='stretch')
-
-        # ---- IRAC / HRAC / FRAC classification, shown as detail only ----
-        st.markdown("**Classification detail (IRAC / HRAC / FRAC)**")
-        detail_rows = []
-        for name in compare_sel:
-            hits = classify_chemical(name, classification_tables)
-            if hits:
-                for h in hits:
-                    detail_rows.append({"Chemical": name, **h})
-            else:
-                detail_rows.append({
-                    "Chemical": name, "Component": "", "System": "—",
-                    "Physiological category": "No IRAC/HRAC/FRAC match found",
-                    "Mode of action": "", "Chemical class/group": "", "Code": "",
-                })
-        detail_df = pd.DataFrame(detail_rows)
-        st.dataframe(detail_df, width='stretch', hide_index=True)
-else:
-    st.info("Select chemicals above to compare them.")
+        st.info("Select chemicals above to compare them.")
