@@ -1,7 +1,7 @@
 import streamlit as st
 
 from common import load_master_import, load_reg_no, load_classifications, reload_all
-from filters import render_filters, apply_filters
+from filters import render_filters, apply_filters, clear_filters
 from charts import METRIC_LABELS, render_trend_chart, render_origin_chart, render_data_table
 from registrations import render_registrations_tab
 from classification import render_classification_expanders
@@ -20,9 +20,16 @@ if st.sidebar.button("🔄 Reload data"):
     st.rerun()
 
 # ---------------- Filters (main area, fully cross-linked) ----------------
-st.subheader("Filters")
-
 year_min, year_max = int(df["year"].min()), int(df["year"].max())
+
+filter_header, filter_clear = st.columns([4, 1])
+with filter_header:
+    st.subheader("Filters")
+with filter_clear:
+    st.write("")  # small vertical nudge so the button lines up with the subheader
+    if st.button("🧹 Clear filters"):
+        clear_filters(year_min, year_max)
+        st.rerun()
 
 row1_col1, row1_col2 = st.columns(2)
 row2_col1, row2_col2 = st.columns(2)
@@ -37,7 +44,9 @@ sel_names = sel["common_name"]
 sel_conc = sel["concentration"]
 sel_form = sel["formulation_type"]
 
-sel_years = st.slider("Year range", year_min, year_max, (year_min, year_max), key="sel_years")
+if "sel_years" not in st.session_state:
+    st.session_state["sel_years"] = (year_min, year_max)
+sel_years = st.slider("Year range", year_min, year_max, key="sel_years")
 filtered = apply_filters(df, sel, sel_years)
 
 st.divider()
