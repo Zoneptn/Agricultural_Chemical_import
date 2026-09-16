@@ -11,46 +11,59 @@ METRIC_LABELS = {
 }
 
 
-def render_trend_chart(filtered, sel_names, metric_choice):
+def _quantity_and_price(df, group_cols):
+    """Both metrics in one pass: summed quantity, and value/quantity price."""
+    agg = df.groupby(group_cols, as_index=False)[["quantity_kg", "value_bht"]].sum()
+    agg["price_thb"] = agg["value_bht"] / agg["quantity_kg"].replace(0, pd.NA)
+    return agg
+
+
+def render_trend_chart(filtered, sel_names):
+    """Always shows both charts — quantity and average price only matter
+    here, so there's nothing to choose between."""
     group_cols = ["year", "common_name"] if sel_names else ["year"]
+    trend = _quantity_and_price(filtered, group_cols)
+    color = "common_name" if sel_names else None
 
-    if metric_choice == "price_thb":
-        trend = filtered.groupby(group_cols, as_index=False)[["value_bht", "quantity_kg"]].sum()
-        trend["price_thb"] = trend["value_bht"] / trend["quantity_kg"].replace(0, pd.NA)
-        y_col = "price_thb"
-    else:
-        trend = filtered.groupby(group_cols, as_index=False)[metric_choice].sum()
-        y_col = metric_choice
-
-    if sel_names:
-        # one or more chemicals picked -> a line per chemical
-        fig = px.line(
-            trend, x="year", y=y_col, color="common_name", markers=True,
-            labels={"year": "Year", y_col: METRIC_LABELS[metric_choice], "common_name": "Chemical"},
-        )
-    else:
-        # no chemical picked -> single aggregate line (500+ chemicals would be unreadable split out)
-        fig = px.line(
-            trend, x="year", y=y_col, markers=True, labels={"year": "Year", y_col: METRIC_LABELS[metric_choice]}
-        )
-        st.caption("Pick one or more chemicals above to split this line by chemical.")
-    st.plotly_chart(fig, width='stretch')
-
-
-def render_origin_chart(filtered, metric_choice):
-    if metric_choice == "price_thb":
-        by_origin = filtered.groupby("origin", as_index=False)[["value_bht", "quantity_kg"]].sum()
-        by_origin["price_thb"] = by_origin["value_bht"] / by_origin["quantity_kg"].replace(0, pd.NA)
-    else:
-        by_origin = filtered.groupby("origin", as_index=False)[metric_choice].sum()
-    by_origin = by_origin.sort_values(metric_choice, ascending=False).head(15)
-
-    fig = px.bar(
-        by_origin, x=metric_choice, y="origin", orientation="h",
-        labels={metric_choice: METRIC_LABELS[metric_choice], "origin": "Origin"},
+    st.markdown("**Import quantity (kg) by year**")
+    fig_qty = px.line(
+        trend, x="year", y="quantity_kg", color=color, markers=True,
+        labels={"year": "Year", "quantity_kg": "Import quantity (kg)", "common_name": "Chemical"},
     )
-    fig.update_layout(yaxis={"categoryorder": "total ascending"})
-    st.plotly_chart(fig, width='stretch')
+    st.plotly_chart(fig_qty, width='stretch')
+
+    st.markdown("**Average price (THB/kg) by year**")
+    fig_price = px.line(
+        trend, x="year", y="price_thb", color=color, markers=True,
+        labels={"year": "Year", "price_thb": "Average price (THB/kg)", "common_name": "Chemical"},
+    )
+    st.plotly_chart(fig_price, width='stretch')
+
+    if not sel_names:
+        st.caption("Pick one or more chemicals above to split these lines by chemical.")
+
+
+def render_origin_chart(filtered):
+    """Always shows both — quantity and average price by origin country."""
+    by_origin = _quantity_and_price(filtered, ["origin"])
+
+    st.markdown("**Import quantity (kg) by origin country**")
+    top_qty = by_origin.sort_values("quantity_kg", ascending=False).head(15)
+    fig_qty = px.bar(
+        top_qty, x="quantity_kg", y="origin", orientation="h",
+        labels={"quantity_kg": "Import quantity (kg)", "origin": "Origin"},
+    )
+    fig_qty.update_layout(yaxis={"categoryorder": "total ascending"})
+    st.plotly_chart(fig_qty, width='stretch')
+
+    st.markdown("**Average price (THB/kg) by origin country**")
+    top_price = by_origin.sort_values("price_thb", ascending=False).head(15)
+    fig_price = px.bar(
+        top_price, x="price_thb", y="origin", orientation="h",
+        labels={"price_thb": "Average price (THB/kg)", "origin": "Origin"},
+    )
+    fig_price.update_layout(yaxis={"categoryorder": "total ascending"})
+    st.plotly_chart(fig_price, width='stretch')
 
 
 def render_data_table(filtered):
