@@ -34,6 +34,68 @@ def filter_active_registrations(reg_df, sel_names, sel_conc, sel_form):
     return reg_view
 
 
+SEARCH_TEXT_COLS = ["reg_no", "trade_name", "common_name_original", "distributor", "importer"]
+
+
+def search_registrations(reg_df, query, categories, names, concs, forms, active_only):
+    """General-purpose registration search: free-text across reg_no/trade
+    name/original name/distributor/importer, plus dropdown filters for
+    category, chemical, concentration, and formulation type."""
+    view = not_expired(reg_df) if active_only else reg_df
+
+    if query and query.strip():
+        q = query.strip().lower()
+        mask = False
+        for col in SEARCH_TEXT_COLS:
+            mask = mask | view[col].str.lower().str.contains(q, regex=False, na=False)
+        view = view[mask]
+
+    if categories:
+        view = view[view["category"].isin(categories)]
+    if names:
+        view = view[view["common_name"].str.lower().isin([n.lower() for n in names])]
+    if concs:
+        view = view[view["concentration"].str.lower().isin([c.lower() for c in concs])]
+    if forms:
+        view = view[view["formulation_type"].str.lower().isin([f.lower() for f in forms])]
+
+    return view
+
+
+SEARCH_DISPLAY_COLS = {
+    "reg_no": "Reg. No.",
+    "category": "Category",
+    "common_name": "Chemical",
+    "common_name_original": "Original name",
+    "concentration": "Concentration",
+    "formulation_type": "Formulation type",
+    "trade_name": "Trade name",
+    "source": "Source",
+    "register": "Register",
+    "importer": "Importer",
+    "distributor": "Distributor",
+    "issued": "Issued",
+    "expire": "Expires",
+    "status": "Status",
+}
+
+
+def render_search_results(view):
+    if view.empty:
+        st.warning("No registrations match this search.")
+        return
+
+    display = view[list(SEARCH_DISPLAY_COLS.keys())].rename(columns=SEARCH_DISPLAY_COLS).sort_values("Chemical")
+    st.caption(f"{len(view):,} registration(s) found — {view['distributor'].nunique():,} unique distributor(s).")
+    st.dataframe(display, width='stretch', hide_index=True)
+    st.download_button(
+        "Download search results as CSV",
+        display.to_csv(index=False).encode("utf-8"),
+        "registration_search_results.csv",
+        "text/csv",
+    )
+
+
 def render_registrations_tab(reg_view, sel_names):
     """Renders the detailed table for a look-up someone wants to dig into —
     the summary counts live above this tab, not repeated here."""
