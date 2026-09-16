@@ -38,8 +38,12 @@ def render_registrations_tab(reg_df, sel_names, sel_conc, sel_form):
         return
 
     view = reg_view[list(DISPLAY_COLS.keys())].rename(columns=DISPLAY_COLS).sort_values("Chemical")
+
+    c1, c2 = st.columns(2)
+    c1.metric("Active registrations matched", f"{len(reg_view):,}")
+    c2.metric("Unique distributors", f"{reg_view['distributor'].nunique():,}")
+
     st.dataframe(view, width='stretch', hide_index=True)
-    st.caption(f"{len(reg_view):,} active registration(s) matched.")
     st.download_button(
         "Download active registrations as CSV",
         view.to_csv(index=False).encode("utf-8"),
