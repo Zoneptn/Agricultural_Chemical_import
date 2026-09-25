@@ -34,7 +34,67 @@ def filter_active_registrations(reg_df, sel_names, sel_conc, sel_form):
     return reg_view
 
 
-SEARCH_TEXT_COLS = ["reg_no", "trade_name", "common_name_original", "distributor", "importer"]
+SEARCH_TEXT_COLS = ["reg_no", "trade_name", "common_name", "common_name_original", "distributor", "importer"]
+
+
+CHEMICAL_VARIANT_COLS = ["common_name", "concentration", "formulation_type"]
+CHEMICAL_VARIANT_LABELS = {
+    "common_name": "Chemical (common name)",
+    "concentration": "Concentration",
+    "formulation_type": "Formulation type",
+}
+CHEMICAL_VARIANT_KEYS = {c: f"search_{c}" for c in CHEMICAL_VARIANT_COLS}
+_LAST_CHANGED_KEY = "_chem_variant_last_changed"
+
+
+def _mark_changed(col):
+    st.session_state[_LAST_CHANGED_KEY] = col
+
+
+def _chemical_variant_options(reg_df, col, skip_narrowing=False):
+    """Options for `col`, narrowed by the other two chemical-variant fields'
+    current selections — unless skip_narrowing, which returns the full
+    unconstrained set (used for whichever field the user just touched, so a
+    stale, not-yet-reconciled other field can never make that fresh pick
+    invalid or crash the widget)."""
+    if skip_narrowing:
+        return sorted(reg_df[col].unique())
+    sub = reg_df
+    for other in CHEMICAL_VARIANT_COLS:
+        if other == col:
+            continue
+        other_sel = st.session_state.get(CHEMICAL_VARIANT_KEYS[other], [])
+        if other_sel:
+            sub = sub[sub[other].isin(other_sel)]
+    return sorted(sub[col].unique())
+
+
+def render_chemical_variant_filters(reg_df, slots):
+    """Renders the chemical/concentration/formulation-type dropdowns into
+    `slots` (dict col -> st column), cross-narrowed against each other.
+    Whichever field the user just changed is treated as authoritative for
+    this render (its own options aren't narrowed by the other two, which may
+    still be stale) — the other two get narrowed and sanitized against it, so
+    picking an incompatible value for a still-set field cleanly clears it
+    instead of the fresh pick getting silently overridden. Returns a dict
+    col -> list of selected values."""
+    last_changed = st.session_state.get(_LAST_CHANGED_KEY)
+    sel = {}
+    for col in CHEMICAL_VARIANT_COLS:
+        with slots[col]:
+            opts = _chemical_variant_options(reg_df, col, skip_narrowing=(col == last_changed))
+            key = CHEMICAL_VARIANT_KEYS[col]
+            # drop any previously-selected values that no longer apply, so a
+            # tighter set from another field never crashes the widget — but
+            # never do this to the field the user just touched
+            if key in st.session_state and col != last_changed:
+                valid = [v for v in st.session_state[key] if v in opts]
+                if valid != st.session_state[key]:
+                    st.session_state[key] = valid
+            sel[col] = st.multiselect(
+                CHEMICAL_VARIANT_LABELS[col], opts, key=key, on_change=_mark_changed, args=(col,)
+            )
+    return sel
 
 
 def issued_date_bounds(reg_df):
