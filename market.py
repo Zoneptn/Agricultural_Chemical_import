@@ -27,6 +27,57 @@ def with_category(df, category_map):
     return out
 
 
+def render_keyword_aggregation(df):
+    """Sums import quantity/price by year across every chemical whose name
+    contains a typed keyword — e.g. "copper" rolls up copper hydroxide,
+    copper oxychloride, copper sulfate, etc. into one trend, since these are
+    usually different formulations of the same underlying active ingredient
+    family rather than genuinely separate products."""
+    keyword = st.text_input("Aggregate by keyword in chemical name", placeholder="e.g. copper, mancozeb, glyphosate ...")
+
+    if not keyword or not keyword.strip():
+        st.info("Type a keyword above — e.g. \"copper\" — to sum up every matching chemical's import volume by year.")
+        return
+
+    kw = keyword.strip().lower()
+    matched = df[df["common_name"].str.lower().str.contains(kw, na=False, regex=False)]
+
+    if matched.empty:
+        st.warning(f"No chemical names contain \"{keyword}\".")
+        return
+
+    matched_names = sorted(matched["common_name"].unique())
+    st.caption(f"Matched {len(matched_names)} chemical name(s): {', '.join(matched_names)}")
+
+    by_year = matched.groupby("year", as_index=False)[["quantity_kg", "value_bht"]].sum()
+    by_year["price_thb"] = by_year["value_bht"] / by_year["quantity_kg"].replace(0, pd.NA)
+
+    c1, c2 = st.columns(2)
+    c1.metric("Total quantity (kg)", f"{matched['quantity_kg'].sum():,.0f}")
+    c2.metric("Total value (THB)", f"{matched['value_bht'].sum():,.0f}")
+
+    st.markdown(f"**\"{keyword}\" — import quantity (kg) by year**")
+    fig_qty = px.line(
+        by_year, x="year", y="quantity_kg", markers=True,
+        labels={"year": "Year", "quantity_kg": "Import quantity (kg)"},
+    )
+    st.plotly_chart(fig_qty, width='stretch')
+
+    st.markdown(f"**\"{keyword}\" — average price (THB/kg) by year**")
+    fig_price = px.line(
+        by_year, x="year", y="price_thb", markers=True,
+        labels={"year": "Year", "price_thb": "Average price (THB/kg)"},
+    )
+    st.plotly_chart(fig_price, width='stretch')
+
+    with st.expander("Breakdown by matched chemical name"):
+        by_name = matched.groupby("common_name", as_index=False)["quantity_kg"].sum().sort_values(
+            "quantity_kg", ascending=False
+        )
+        by_name = by_name.rename(columns={"common_name": "Chemical", "quantity_kg": "Total quantity (kg)"})
+        st.dataframe(by_name.style.format({"Total quantity (kg)": "{:,.0f}"}), width='stretch', hide_index=True)
+
+
 def render_category_trend(df, sel_categories):
     """Total import quantity by year, one line per category — all categories
     shown by default, narrow via sel_categories to fewer."""
