@@ -1,7 +1,14 @@
 import streamlit as st
 
 from common import load_master_import, load_reg_no, reload_all
-from market import build_category_map, with_category, render_category_trend, render_origin_market_share, render_movers_table
+from market import (
+    build_category_map,
+    with_category,
+    render_keyword_aggregation,
+    render_category_trend,
+    render_origin_market_share,
+    render_movers_table,
+)
 
 df_raw = load_master_import()
 reg_df = load_reg_no()
@@ -9,12 +16,17 @@ category_map = build_category_map(reg_df)
 df = with_category(df_raw, category_map)
 
 st.title("📊 Market Summary")
-st.caption("Category trends, origin-country market share, and year-over-year movers across all chemical imports.")
+st.caption("Keyword rollups, category trends, origin-country market share, and year-over-year movers across all chemical imports.")
 
 st.sidebar.header("Data")
 if st.sidebar.button("🔄 Reload data"):
     reload_all()
     st.rerun()
+
+st.subheader("Aggregate by keyword")
+render_keyword_aggregation(df)
+
+st.divider()
 
 st.subheader("Total import volume by category")
 sel_categories = st.multiselect(
