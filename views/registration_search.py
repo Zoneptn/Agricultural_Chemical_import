@@ -1,7 +1,7 @@
 import streamlit as st
 
 from common import load_reg_no, reload_all
-from registrations import search_registrations, render_search_results, issued_date_bounds
+from registrations import search_registrations, render_search_results, issued_date_bounds, render_chemical_variant_filters
 
 reg_df = load_reg_no()
 issued_min, issued_max = issued_date_bounds(reg_df)
@@ -15,21 +15,21 @@ if st.sidebar.button("🔄 Reload data"):
     st.rerun()
 
 query = st.text_input(
-    "Search by trade name, registration number, original name, distributor, or importer",
-    placeholder="e.g. Amistar, 2554 - 19, Syngenta ...",
+    "Search by chemical name, trade name, registration number, original name, distributor, or importer",
+    placeholder="e.g. glyphosate, Amistar, 2554 - 19, Syngenta ...",
 )
 
 c1, c2 = st.columns(2)
 with c1:
     sel_categories = st.multiselect("Category", sorted(reg_df["category"].unique()))
-with c2:
-    sel_names = st.multiselect("Chemical (common name)", sorted(reg_df["common_name"].unique()))
 
-c3, c4 = st.columns(2)
-with c3:
-    sel_conc = st.multiselect("Concentration", sorted(reg_df["concentration"].unique()))
-with c4:
-    sel_form = st.multiselect("Formulation type", sorted(reg_df["formulation_type"].unique()))
+row1_c2 = c2
+row2_c1, row2_c2 = st.columns(2)
+slots = {"common_name": row1_c2, "concentration": row2_c1, "formulation_type": row2_c2}
+sel = render_chemical_variant_filters(reg_df, slots)
+sel_names = sel["common_name"]
+sel_conc = sel["concentration"]
+sel_form = sel["formulation_type"]
 
 sel_distributors = st.multiselect("Distributor", sorted(reg_df["distributor"].unique()))
 
