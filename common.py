@@ -26,9 +26,10 @@ def load_master_import():
 def load_reg_no():
     df = pd.read_excel(DATA_PATH, sheet_name="reg_no")
     df["formulation_type"] = df["formulation_type"].fillna("Unspecified")
+    df["source_country"] = df["source_country"].fillna("")
     for col in [
         "reg_no", "common_name", "common_name_original", "concentration", "formulation_type",
-        "trade_name", "source", "register", "importer", "distributor", "status", "category",
+        "trade_name", "source", "source_country", "register", "importer", "distributor", "status", "category",
     ]:
         df[col] = df[col].astype(str).str.strip()
     return df
