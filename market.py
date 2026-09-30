@@ -11,6 +11,8 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+from common import aggregate_with_price
+
 UNCATEGORIZED = "Uncategorized"
 
 
@@ -72,12 +74,15 @@ def render_keyword_aggregation(df, reg_df):
         regs = active_reg_df[active_reg_df["common_name"].str.lower().isin([n.lower() for n in names])]
         total_qty = matched["quantity_kg"].sum()
         total_val = matched["value_bht"].sum()
+        priced = matched[matched["value_bht"] > 0]
+        priced_qty = priced["quantity_kg"].sum()
+        avg_price = (priced["value_bht"].sum() / priced_qty) if priced_qty else pd.NA
         summary_rows.append({
             "Keyword": kw,
             "Matched products": len(names),
             "Total quantity (kg)": total_qty,
             "Total value (THB)": total_val,
-            "Avg price (THB/kg)": total_val / total_qty if total_qty else 0,
+            "Avg price (THB/kg)": avg_price,
             "Active registrations": len(regs),
             "Distributors": regs["distributor"].nunique(),
         })
@@ -93,8 +98,7 @@ def render_keyword_aggregation(df, reg_df):
 
     # ---- Combined trend, one line per keyword ----
     combined = pd.concat([matched.assign(keyword=kw) for kw, matched in groups.items()], ignore_index=True)
-    by_year = combined.groupby(["year", "keyword"], as_index=False)[["quantity_kg", "value_bht"]].sum()
-    by_year["price_thb"] = by_year["value_bht"] / by_year["quantity_kg"].replace(0, pd.NA)
+    by_year = aggregate_with_price(combined, ["year", "keyword"])
 
     st.markdown("**Import quantity (kg) by year**")
     fig_qty = px.line(
