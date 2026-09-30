@@ -8,6 +8,7 @@ search_page = st.Page("views/registration_search.py", title="Registration Search
 market_page = st.Page("views/market_summary.py", title="Market Summary", icon="📊")
 supplier_page = st.Page("views/supplier_profile.py", title="Supplier Profile", icon="🏢")
 cumulative_page = st.Page("views/cumulative_analysis.py", title="Cumulative Analysis", icon="📈")
+benchmark_page = st.Page("views/shk_benchmark.py", title="SHK Benchmark", icon="📐")
 
-nav = st.navigation([overview_page, comparison_page, search_page, market_page, supplier_page, cumulative_page])
+nav = st.navigation([overview_page, comparison_page, search_page, market_page, supplier_page, cumulative_page, benchmark_page])
 nav.run()
