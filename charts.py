@@ -1,7 +1,8 @@
 """Trend, origin-breakdown, and data-table rendering for the Overview page."""
-import pandas as pd
 import plotly.express as px
 import streamlit as st
+
+from common import aggregate_with_price
 
 METRIC_LABELS = {
     "quantity_kg": "Import quantity (kg)",
@@ -12,10 +13,9 @@ METRIC_LABELS = {
 
 
 def _quantity_and_price(df, group_cols):
-    """Both metrics in one pass: summed quantity, and value/quantity price."""
-    agg = df.groupby(group_cols, as_index=False)[["quantity_kg", "value_bht"]].sum()
-    agg["price_thb"] = agg["value_bht"] / agg["quantity_kg"].replace(0, pd.NA)
-    return agg
+    """Both metrics in one pass: summed quantity, and value/quantity price
+    (computed only from rows with recorded value — see aggregate_with_price)."""
+    return aggregate_with_price(df, group_cols)
 
 
 def render_trend_chart(filtered, sel_names):
