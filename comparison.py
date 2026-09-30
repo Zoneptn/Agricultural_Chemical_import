@@ -9,12 +9,14 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+from common import aggregate_with_price
 from classification import render_classification_expanders
 
 PLACEHOLDER = "— Select —"
 ALL_CONCENTRATIONS = "All concentrations"
 ALL_FORMULATIONS = "All formulation types"
 ALL_COUNTRIES = "All countries"
+MAX_SLOTS = 10
 
 SUMMARY_COLS = {
     "_label": "Chemical",
@@ -35,6 +37,14 @@ def _slot_label(spec):
     return spec["chemical"] if not extras else f"{spec['chemical']} ({', '.join(extras)})"
 
 
+def clear_slots():
+    """Resets every slot's picks (up to the max possible, in case the slider
+    was previously higher) back to their defaults by dropping the widget keys."""
+    for slot_idx in range(MAX_SLOTS):
+        for prefix in ("cmp_chem_", "cmp_conc_", "cmp_form_", "cmp_country_"):
+            st.session_state.pop(f"{prefix}{slot_idx}", None)
+
+
 def render_slot_pickers(df, num_chem):
     """Renders `num_chem` rows, each with 4 dropdowns: chemical, concentration,
     formulation type, and origin country. The latter three are narrowed to that
@@ -44,7 +54,13 @@ def render_slot_pickers(df, num_chem):
     three are None when left on their "All ..." option."""
     chem_options = [PLACEHOLDER] + sorted(df["common_name"].unique())
 
-    st.caption("Each row is one chemical to compare. Leave a field on \"All ...\" to aggregate across it.")
+    caption_col, clear_col = st.columns([4, 1])
+    with caption_col:
+        st.caption("Each row is one chemical to compare. Leave a field on \"All ...\" to aggregate across it.")
+    with clear_col:
+        if st.button("🧹 Clear all"):
+            clear_slots()
+            st.rerun()
 
     specs = []
     for slot_idx in range(num_chem):
@@ -117,8 +133,7 @@ def build_combined_frame(df, specs):
 
 def render_comparison_trend(combined, metric_choice, metric_labels):
     if metric_choice == "price_thb":
-        trend = combined.groupby(["year", "_label"], as_index=False)[["value_bht", "quantity_kg"]].sum()
-        trend["price_thb"] = trend["value_bht"] / trend["quantity_kg"].replace(0, pd.NA)
+        trend = aggregate_with_price(combined, ["year", "_label"])
         y_col = "price_thb"
     else:
         trend = combined.groupby(["year", "_label"], as_index=False)[metric_choice].sum()
@@ -140,7 +155,13 @@ def render_comparison_summary(combined):
         first_year=("year", "min"),
         last_year=("year", "max"),
     )
-    summary["avg_price_thb_per_kg"] = summary["total_value_bht"] / summary["total_quantity_kg"].replace(0, pd.NA)
+    # price computed from value>0 rows only — see aggregate_with_price's
+    # docstring for why a plain total_value/total_quantity divide here would
+    # silently understate price whenever the comparison spans both years
+    # with recorded value and years (2024, 2025) with none
+    price_by_label = aggregate_with_price(combined, ["_label"])[["_label", "price_thb"]]
+    price_by_label = price_by_label.rename(columns={"price_thb": "avg_price_thb_per_kg"})
+    summary = summary.merge(price_by_label, on="_label", how="left")
     summary = summary.rename(columns=SUMMARY_COLS)[list(SUMMARY_COLS.values())]
     summary = summary.sort_values("Total quantity (kg)", ascending=False)
 
