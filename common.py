@@ -83,6 +83,29 @@ def not_expired(reg_df):
     return reg_df[reg_df["expire"].isna() | (reg_df["expire"] >= today)]
 
 
+def aggregate_with_price(df, group_cols, qty_col="quantity_kg", value_col="value_bht"):
+    """Groups by group_cols, summing quantity from every row (valid across
+    all years) and computing average price using only rows where value is
+    actually recorded (value > 0). This matters beyond the obvious case: 2024
+    and 2025 have $0 recorded for value_bht across every row in this dataset
+    despite real shipped quantity. For a group that spans only one of those
+    years, including the zero rows would show an obvious price of 0 — easy
+    to notice. But for a group spanning MULTIPLE years at once (e.g. total
+    price by origin country, or a comparison summary across the whole date
+    range), blending a $0 year in with real-value years silently understates
+    the average instead of showing anything obviously wrong. Excluding those
+    rows from the price computation entirely (not just masking an
+    already-summed total) handles both cases correctly with one mechanism."""
+    qty_agg = df.groupby(group_cols, as_index=False)[qty_col].sum()
+    priced_rows = df[df[value_col] > 0]
+    if priced_rows.empty:
+        qty_agg["price_thb"] = pd.NA
+        return qty_agg
+    price_agg = priced_rows.groupby(group_cols, as_index=False)[[qty_col, value_col]].sum()
+    price_agg["price_thb"] = price_agg[value_col] / price_agg[qty_col].replace(0, pd.NA)
+    return qty_agg.merge(price_agg[list(group_cols) + ["price_thb"]], on=group_cols, how="left")
+
+
 def reload_all():
     load_master_import.clear()
     load_reg_no.clear()
