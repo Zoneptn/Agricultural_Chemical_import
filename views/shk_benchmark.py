@@ -1,7 +1,7 @@
 import streamlit as st
 
 from common import load_reg_no, load_master_import, reload_all
-from benchmark import DEFAULT_DISTRIBUTOR, distributor_options, render_benchmark
+from benchmark import DEFAULT_DISTRIBUTOR, ALL_YEARS, distributor_options, year_options, render_benchmark
 
 reg_df = load_reg_no()
 master_df = load_master_import()
@@ -34,8 +34,16 @@ near_dupes = [
 if near_dupes:
     st.caption(f"Similarly named distributor(s) also on record, kept separate here: {', '.join(near_dupes)}.")
 
-active_only = st.checkbox("Active (non-expired) registrations only", value=True, key="bench_active_only")
+year_choices = [ALL_YEARS] + year_options(master_df)
+year_choice = st.selectbox("Period", year_choices, index=0, key="bench_year")
+year = None if year_choice == ALL_YEARS else int(year_choice)
+
+if year is None:
+    active_only = st.checkbox("Active (non-expired) registrations only", value=True, key="bench_active_only")
+else:
+    active_only = True
+    st.caption(f"Showing {year}: registrations in force at any point that year, and {year}'s own import volume.")
 
 st.divider()
 
-render_benchmark(reg_df, master_df, distributor, active_only)
+render_benchmark(reg_df, master_df, distributor, active_only, year)
