@@ -1,32 +1,18 @@
 """Market-summary logic: category trend, origin-country market share, and
 year-over-year mover analysis, all built from master_import.
 
-master_import has no category field, so category is derived by mapping each
-common_name to the category most often recorded for it in reg_no. Coverage
-isn't total — chemicals reg_no doesn't recognize (salt/ester variants,
-mixtures, names absent from reg_no) fall under "Uncategorized" rather than
-being silently dropped, so totals stay honest.
+master_import carries its own category column directly (every row filled in,
+no gaps), so it's used as-is here. An earlier version of this file derived
+category by mapping each common_name to its most-common category in reg_no
+instead — that was dropped once master_import's own column turned out to
+disagree with the reg_no-derived guess on about 31% of import volume, which
+makes the native column the more trustworthy one for a given shipment.
 """
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
 from common import aggregate_with_price
-
-UNCATEGORIZED = "Uncategorized"
-
-
-@st.cache_data
-def build_category_map(reg_df):
-    """common_name -> its most-common category in reg_no (mode; ties take the
-    first alphabetically for determinism)."""
-    return reg_df.groupby("common_name")["category"].agg(lambda s: sorted(s.mode())[0])
-
-
-def with_category(df, category_map):
-    out = df.copy()
-    out["category"] = out["common_name"].map(category_map).fillna(UNCATEGORIZED)
-    return out
 
 
 def render_keyword_aggregation(df, reg_df):
@@ -152,11 +138,8 @@ def render_category_trend(df, sel_categories):
     )
     st.plotly_chart(fig, width='stretch')
 
-    uncategorized_share = df[df["category"] == UNCATEGORIZED]["quantity_kg"].sum() / df["quantity_kg"].sum()
-    st.caption(
-        f"Category is derived from reg_no by chemical name; about {uncategorized_share:.0%} of import "
-        f"volume comes from chemical name variants reg_no doesn't recognize and falls under \"{UNCATEGORIZED}\"."
-    )
+    other_share = df[df["category"] == "other"]["quantity_kg"].sum() / df["quantity_kg"].sum()
+    st.caption(f"\"other\" is master_import's own catch-all category, not a data gap — it's {other_share:.0%} of import volume.")
 
 
 def render_origin_market_share(df, top_n=8):
@@ -190,6 +173,86 @@ def render_origin_market_share(df, top_n=8):
     with st.expander("View exact figures by year"):
         table = by_year.pivot(index="origin_group", columns="year", values="share_pct").reindex(order)
         st.dataframe(table.round(1).rename_axis("Origin").rename(columns=str), width='stretch')
+
+
+HHI_UNCONCENTRATED = 1500
+HHI_HIGHLY_CONCENTRATED = 2500
+
+
+def concentration_label(hhi):
+    if hhi < HHI_UNCONCENTRATED:
+        return "Unconcentrated"
+    if hhi < HHI_HIGHLY_CONCENTRATED:
+        return "Moderately concentrated"
+    return "Highly concentrated"
+
+
+def compute_origin_hhi(df):
+    """Herfindahl-Hirschman Index of origin-country concentration, by
+    category and year: sum of each origin country's squared percentage
+    share of that category/year's import quantity. Ranges from near 0 (many
+    countries splitting the volume evenly) to 10,000 (one country holds all
+    of it) — a single number for "how many eggs are in how few baskets" on
+    the supply side, standing in for the stacked-share chart above.
+
+    Uses the standard DOJ/FTC merger-guideline bands (<1,500 unconcentrated,
+    1,500-2,500 moderately concentrated, >2,500 highly concentrated) as a
+    rule-of-thumb reference — those were written for firms' revenue shares,
+    but the same math reads the same way applied to supplying countries'
+    volume shares."""
+    totals = df.groupby(["category", "year", "origin"], as_index=False)["quantity_kg"].sum()
+    group_totals = totals.groupby(["category", "year"])["quantity_kg"].transform("sum")
+    totals["share_pct"] = totals["quantity_kg"] / group_totals * 100
+
+    hhi = totals.groupby(["category", "year"], as_index=False).apply(
+        lambda g: pd.Series({"hhi": (g["share_pct"] ** 2).sum()}), include_groups=False
+    )
+
+    top = (
+        totals.sort_values("share_pct", ascending=False)
+        .groupby(["category", "year"], as_index=False)
+        .head(1)[["category", "year", "origin", "share_pct"]]
+        .rename(columns={"origin": "top_origin", "share_pct": "top_origin_share_pct"})
+    )
+    return hhi.merge(top, on=["category", "year"])
+
+
+def render_concentration_index(df):
+    """Current-year snapshot table plus a year-by-year trend of origin-country
+    concentration (HHI) per category, so a rising line flags a category
+    that's becoming more dependent on fewer supplying countries over time."""
+    hhi_df = compute_origin_hhi(df)
+    hhi_df["Concentration"] = hhi_df["hhi"].apply(concentration_label)
+
+    latest_year = int(df["year"].max())
+    latest = hhi_df[hhi_df["year"] == latest_year].sort_values("hhi", ascending=False)
+
+    st.caption(
+        f"Herfindahl-Hirschman Index (HHI) of import quantity by origin country within each category — "
+        f"how dominated a category is by a handful of supplying countries, vs. spread across many. "
+        f"<{HHI_UNCONCENTRATED:,} unconcentrated · {HHI_UNCONCENTRATED:,}–{HHI_HIGHLY_CONCENTRATED:,} "
+        f"moderately concentrated · >{HHI_HIGHLY_CONCENTRATED:,} highly concentrated."
+    )
+
+    table = latest.rename(columns={
+        "category": "Category", "hhi": "HHI", "top_origin": "Top origin",
+        "top_origin_share_pct": "Top origin share (%)",
+    })
+    st.dataframe(
+        table[["Category", "HHI", "Concentration", "Top origin", "Top origin share (%)"]].style.format(
+            {"HHI": "{:,.0f}", "Top origin share (%)": "{:.1f}"}
+        ),
+        width='stretch', hide_index=True,
+    )
+
+    st.markdown(f"**HHI trend by year**")
+    fig = px.line(
+        hhi_df.sort_values("year"), x="year", y="hhi", color="category", markers=True,
+        labels={"year": "Year", "hhi": "HHI", "category": "Category"},
+    )
+    fig.add_hline(y=HHI_UNCONCENTRATED, line_dash="dot", line_color="gray")
+    fig.add_hline(y=HHI_HIGHLY_CONCENTRATED, line_dash="dot", line_color="gray")
+    st.plotly_chart(fig, width='stretch')
 
 
 def render_movers_table(df, current_year, prior_year, top_n=10):
