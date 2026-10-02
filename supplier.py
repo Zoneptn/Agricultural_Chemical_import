@@ -86,6 +86,101 @@ def company_portfolio(reg_df, role, company, active_only):
     return view[mask]
 
 
+def _exploded_by_role(reg_df, role):
+    """reg_df with one row per entity for `role`: multi-value roles
+    (manufacturer, manufacturing country) get split on ";" so each named
+    entity is counted on its own, matching how manufacturer_options() and
+    _has_exact_token() already treat that column elsewhere on this page."""
+    col = ROLE_COLUMNS[role]
+    view = reg_df.dropna(subset=["issued"])
+    if role not in MULTI_VALUE_ROLES:
+        return view[view[col] != ""]
+    exploded = view.assign(**{col: view[col].str.split(";")}).explode(col)
+    exploded[col] = exploded[col].str.strip()
+    return exploded[exploded[col] != ""]
+
+
+@st.cache_data
+def first_seen_year(reg_df, role):
+    """Each entity's first calendar year on record for `role` — the earliest
+    issued date across every registration that names them. Registrations
+    with no issued date can't place an entity in a year, so they're left out
+    of this (they still count everywhere else on this page)."""
+    col = ROLE_COLUMNS[role]
+    view = _exploded_by_role(reg_df, role)
+    return view.groupby(col)["issued"].min().dt.year
+
+
+@st.cache_data
+def entrants_by_year(reg_df, role):
+    """Count of entities first seen in each year, for a history-wide trend —
+    a rising bar means the market is attracting more new manufacturers/
+    importers/distributors/countries that year; a falling one means fewer."""
+    first_year = first_seen_year(reg_df, role)
+    counts = first_year.value_counts().sort_index().reset_index()
+    counts.columns = ["year", "new_entrants"]
+    return counts
+
+
+def new_entrants(reg_df, role, year):
+    """Entities for `role` whose first-ever issued registration falls in
+    `year`, with how many registrations they've filed in total (through the
+    data's latest issued date, regardless of current active status) and how
+    many distinct chemicals/categories that spans."""
+    col = ROLE_COLUMNS[role]
+    first_year = first_seen_year(reg_df, role)
+    entrant_names = first_year[first_year == year].index
+
+    cols = {role: [], "Registrations filed": [], "Distinct chemicals": [], "Categories": []}
+    if len(entrant_names) == 0:
+        return pd.DataFrame(cols)
+
+    view = _exploded_by_role(reg_df, role)
+    view = view[view[col].isin(entrant_names)]
+    for entity, sub in view.groupby(col):
+        cols[role].append(entity)
+        cols["Registrations filed"].append(len(sub))
+        cols["Distinct chemicals"].append(sub["common_name"].nunique())
+        cols["Categories"].append(sub["category"].nunique())
+    return pd.DataFrame(cols).sort_values("Registrations filed", ascending=False)
+
+
+def render_new_entrants(reg_df, role):
+    """History-wide new-entrant trend for `role`, plus a drill-down into any
+    one year's entrants — independent of whichever single company is
+    selected above on this page."""
+    counts = entrants_by_year(reg_df, role)
+    if counts.empty:
+        st.info("No dated registrations on record to determine entry years.")
+        return
+
+    issued_min, issued_max = int(reg_df["issued"].dt.year.min()), int(reg_df["issued"].dt.year.max())
+    spans = (reg_df["expire"] - reg_df["issued"]).dt.days / 365.25
+    if issued_max - issued_min <= spans.median() + 1:
+        st.warning(
+            f"reg_no only has issued dates from {issued_min}–{issued_max}, spanning one registration-renewal "
+            f"cycle (~{spans.median():.0f} years) — not full registration history. \"First seen\" here means "
+            f"first registered or renewed *in this cycle*, not necessarily new to the market: a company "
+            f"supplying since the 1990s and one that's brand-new both show up the year they happened to "
+            f"register. Treat this as renewal-activity timing, not true market-entry intelligence."
+        )
+
+    fig = px.bar(
+        counts, x="year", y="new_entrants",
+        labels={"year": "Year", "new_entrants": f"New {role.lower()}s"},
+    )
+    st.plotly_chart(fig, width='stretch')
+
+    years = sorted(counts["year"].unique(), reverse=True)
+    chosen_year = st.selectbox("Year", years, key="entrants_year")
+    entrants = new_entrants(reg_df, role, chosen_year)
+    if entrants.empty:
+        st.info(f"No new {role.lower()}s first registered in {chosen_year}.")
+    else:
+        st.caption(f"{len(entrants)} new {role.lower()}(s) first registered in {chosen_year}, ranked by how many registrations they've filed since.")
+        st.dataframe(entrants, width='stretch', hide_index=True)
+
+
 def render_supplier_profile(portfolio, role, company):
     if portfolio.empty:
         st.warning(f"No registrations found for this {role.lower()}.")
