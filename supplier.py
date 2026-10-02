@@ -126,49 +126,75 @@ def entrants_by_year(reg_df, role):
     return counts
 
 
-def new_entrants(reg_df, role, year):
-    """Entities for `role` whose first-ever issued registration falls in
-    `year`, with how many registrations they've filed in total (through the
-    data's latest issued date, regardless of current active status), the
-    actual chemical/concentration/formulation combos that make up their
-    portfolio — the quickest way to spot what's about to launch — and how
-    many categories that spans."""
-    col = ROLE_COLUMNS[role]
-    first_year = first_seen_year(reg_df, role)
-    entrant_names = first_year[first_year == year].index
-
-    cols = {role: [], "Chemicals": [], "Registrations filed": [], "Categories": []}
-    if len(entrant_names) == 0:
-        return pd.DataFrame(cols)
-
-    view = _exploded_by_role(reg_df, role)
-    view = view[view[col].isin(entrant_names)]
-    for entity, sub in view.groupby(col):
-        combos = sub[["common_name", "concentration", "formulation_type"]].drop_duplicates()
-        chemicals = "; ".join(
-            f"{row.common_name} ({row.concentration}, {row.formulation_type})" for row in combos.itertuples()
-        )
-        cols[role].append(entity)
-        cols["Chemicals"].append(chemicals)
-        cols["Registrations filed"].append(len(sub))
-        cols["Categories"].append(sub["category"].nunique())
-    return pd.DataFrame(cols).sort_values("Registrations filed", ascending=False)
-
-
-def new_entrant_detail(reg_df, role, year):
-    """Every registration behind new_entrants()'s counts, at chemical level —
-    which product (chemical, concentration, formulation type), which
-    category, which manufacturer (source), and which distributor it's coming
-    through — so "70 new distributors" turns into "here's what each one is
-    actually bringing"."""
+def _entrant_registrations(reg_df, role, year):
+    """Exploded reg_no rows (one row per entity per registration — a
+    registration naming several manufacturers appears once per manufacturer)
+    behind this year's new entrants for `role`. The shared base every
+    new-entrant breakdown below is built from."""
     col = ROLE_COLUMNS[role]
     first_year = first_seen_year(reg_df, role)
     entrant_names = first_year[first_year == year].index
     if len(entrant_names) == 0:
         return pd.DataFrame()
-
     view = _exploded_by_role(reg_df, role)
-    view = view[view[col].isin(entrant_names)]
+    return view[view[col].isin(entrant_names)]
+
+
+def new_entrant_products(reg_df, role, year):
+    """What's new, at product level: every distinct chemical/concentration/
+    formulation combo among this year's new entrants' registrations, with
+    how many registrations use it — deduplicated by reg_no first, so a
+    registration naming several manufacturers is counted once, not once per
+    manufacturer."""
+    cols = ["Chemical", "Concentration", "Formulation type", "Registrations filed"]
+    regs = _entrant_registrations(reg_df, role, year)
+    if regs.empty:
+        return pd.DataFrame(columns=cols)
+    deduped = regs.drop_duplicates(subset=["reg_no"])
+    out = (
+        deduped.groupby(["common_name", "concentration", "formulation_type"])
+        .size()
+        .reset_index(name="Registrations filed")
+        .rename(columns={"common_name": "Chemical", "concentration": "Concentration", "formulation_type": "Formulation type"})
+    )
+    return out[cols].sort_values("Registrations filed", ascending=False)
+
+
+def new_entrant_by_company(reg_df, role, year):
+    """Same new-entrant registrations rolled up by entity instead of by
+    product — how many registrations each new company (under the role
+    currently being viewed) is behind."""
+    col = ROLE_COLUMNS[role]
+    regs = _entrant_registrations(reg_df, role, year)
+    if regs.empty:
+        return pd.DataFrame(columns=[role, "Registrations filed"])
+    out = regs.groupby(col).size().reset_index(name="Registrations filed").rename(columns={col: role})
+    return out.sort_values("Registrations filed", ascending=False)
+
+
+def new_entrant_by_distributor(reg_df, role, year):
+    """Same new-entrant registrations rolled up by distributor — useful even
+    when viewing by a different role (manufacturer, importer, country),
+    since distributor is usually the business-facing side of the question.
+    Deduplicated by reg_no, same reasoning as new_entrant_products()."""
+    regs = _entrant_registrations(reg_df, role, year)
+    if regs.empty:
+        return pd.DataFrame(columns=["Distributor", "Registrations filed"])
+    deduped = regs.drop_duplicates(subset=["reg_no"])
+    out = deduped.groupby("distributor").size().reset_index(name="Registrations filed").rename(columns={"distributor": "Distributor"})
+    return out.sort_values("Registrations filed", ascending=False)
+
+
+def new_entrant_detail(reg_df, role, year):
+    """Every registration behind this year's new-entrant counts, at chemical
+    level — which product (chemical, concentration, formulation type), which
+    category, which manufacturer (source), and which distributor it's coming
+    through — so "70 new distributors" turns into "here's what each one is
+    actually bringing"."""
+    col = ROLE_COLUMNS[role]
+    view = _entrant_registrations(reg_df, role, year)
+    if view.empty:
+        return pd.DataFrame()
 
     # base labels first, then `col` (the role's own column) is set last so it
     # always wins its own label — e.g. role == "Manufacturer (source)" means
@@ -216,15 +242,30 @@ def render_new_entrants(reg_df, role):
 
     years = sorted(counts["year"].unique(), reverse=True)
     chosen_year = st.selectbox("Year", years, key="entrants_year")
-    entrants = new_entrants(reg_df, role, chosen_year)
-    if entrants.empty:
+    n_entities = int(counts.loc[counts["year"] == chosen_year, "new_entrants"].sum())
+    products = new_entrant_products(reg_df, role, chosen_year)
+    if products.empty:
         st.info(f"No new {role.lower()}s first registered in {chosen_year}.")
     else:
-        st.caption(f"{len(entrants)} new {role.lower()}(s) first registered in {chosen_year}, ranked by how many registrations they've filed since.")
-        st.dataframe(entrants, width='stretch', hide_index=True)
+        st.caption(f"{n_entities} new {role.lower()}(s) first registered in {chosen_year}.")
+
+        st.markdown(f"**What's new — {chosen_year}**")
+        st.dataframe(
+            products.style.format({"Registrations filed": "{:,.0f}"}),
+            width='stretch', hide_index=True,
+        )
+
+        st.markdown(f"**By {role.lower()}**")
+        by_company = new_entrant_by_company(reg_df, role, chosen_year)
+        st.dataframe(by_company, width='stretch', hide_index=True)
+
+        if role != "Distributor":
+            st.markdown("**By distributor**")
+            by_distributor = new_entrant_by_distributor(reg_df, role, chosen_year)
+            st.dataframe(by_distributor, width='stretch', hide_index=True)
 
         detail = new_entrant_detail(reg_df, role, chosen_year)
-        st.markdown(f"**What these new {role.lower()}s are bringing — {chosen_year}**")
+        st.markdown(f"**What these new {role.lower()}s are bringing, by category — {chosen_year}**")
         cat_counts = detail.drop_duplicates(subset=["Reg. No."])["Category"].value_counts().reset_index()
         cat_counts.columns = ["Category", "Registrations"]
         fig_cat = px.bar(
