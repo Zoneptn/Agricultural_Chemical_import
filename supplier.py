@@ -152,8 +152,9 @@ def new_entrants(reg_df, role, year):
 def new_entrant_detail(reg_df, role, year):
     """Every registration behind new_entrants()'s counts, at chemical level —
     which product (chemical, concentration, formulation type), which
-    category, and which distributor it's coming through — so "70 new
-    distributors" turns into "here's what each one is actually bringing"."""
+    category, which manufacturer (source), and which distributor it's coming
+    through — so "70 new distributors" turns into "here's what each one is
+    actually bringing"."""
     col = ROLE_COLUMNS[role]
     first_year = first_seen_year(reg_df, role)
     entrant_names = first_year[first_year == year].index
@@ -163,13 +164,22 @@ def new_entrant_detail(reg_df, role, year):
     view = _exploded_by_role(reg_df, role)
     view = view[view[col].isin(entrant_names)]
 
-    detail_cols = list(dict.fromkeys([col, "distributor", "common_name", "concentration", "formulation_type", "category", "reg_no", "issued"]))
+    # base labels first, then `col` (the role's own column) is set last so it
+    # always wins its own label — e.g. role == "Manufacturer (source)" means
+    # col == "source", and without this ordering the generic "Source" label
+    # below would clobber the role's own "Manufacturer (source)" header
     rename = {
-        col: role, "distributor": "Distributor", "common_name": "Chemical",
+        "distributor": "Distributor", "source": "Source", "common_name": "Chemical",
         "concentration": "Concentration", "formulation_type": "Formulation type",
         "category": "Category", "reg_no": "Reg. No.", "issued": "Issued",
     }
-    return view[detail_cols].rename(columns=rename).sort_values([role, "Chemical"])
+    rename[col] = role
+
+    detail_cols = list(dict.fromkeys([col, "distributor", "source", "common_name", "concentration", "formulation_type", "category", "reg_no", "issued"]))
+    out = view[detail_cols].rename(columns=rename)
+
+    order = [c for c in dict.fromkeys([role, "Distributor", "Source", "Chemical", "Concentration", "Formulation type", "Category", "Reg. No.", "Issued"]) if c in out.columns]
+    return out[order].sort_values([role, "Chemical"])
 
 
 def render_new_entrants(reg_df, role):
