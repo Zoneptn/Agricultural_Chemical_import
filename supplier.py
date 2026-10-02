@@ -149,6 +149,29 @@ def new_entrants(reg_df, role, year):
     return pd.DataFrame(cols).sort_values("Registrations filed", ascending=False)
 
 
+def new_entrant_detail(reg_df, role, year):
+    """Every registration behind new_entrants()'s counts, at chemical level —
+    which product (chemical, concentration, formulation type), which
+    category, and which distributor it's coming through — so "70 new
+    distributors" turns into "here's what each one is actually bringing"."""
+    col = ROLE_COLUMNS[role]
+    first_year = first_seen_year(reg_df, role)
+    entrant_names = first_year[first_year == year].index
+    if len(entrant_names) == 0:
+        return pd.DataFrame()
+
+    view = _exploded_by_role(reg_df, role)
+    view = view[view[col].isin(entrant_names)]
+
+    detail_cols = list(dict.fromkeys([col, "distributor", "common_name", "concentration", "formulation_type", "category", "reg_no", "issued"]))
+    rename = {
+        col: role, "distributor": "Distributor", "common_name": "Chemical",
+        "concentration": "Concentration", "formulation_type": "Formulation type",
+        "category": "Category", "reg_no": "Reg. No.", "issued": "Issued",
+    }
+    return view[detail_cols].rename(columns=rename).sort_values([role, "Chemical"])
+
+
 def render_new_entrants(reg_df, role):
     """History-wide new-entrant trend for `role`, plus a drill-down into any
     one year's entrants — independent of whichever single company is
@@ -183,6 +206,26 @@ def render_new_entrants(reg_df, role):
     else:
         st.caption(f"{len(entrants)} new {role.lower()}(s) first registered in {chosen_year}, ranked by how many registrations they've filed since.")
         st.dataframe(entrants, width='stretch', hide_index=True)
+
+        detail = new_entrant_detail(reg_df, role, chosen_year)
+        st.markdown(f"**What these new {role.lower()}s are bringing — {chosen_year}**")
+        cat_counts = detail.drop_duplicates(subset=["Reg. No."])["Category"].value_counts().reset_index()
+        cat_counts.columns = ["Category", "Registrations"]
+        fig_cat = px.bar(
+            cat_counts.sort_values("Registrations", ascending=True), x="Registrations", y="Category", orientation="h",
+            labels={"Registrations": "New registrations", "Category": "Category"},
+        )
+        st.plotly_chart(fig_cat, width='stretch')
+        st.caption("Counted once per registration, even for a role (like manufacturer) that can list several names on one registration.")
+
+        st.dataframe(detail, width='stretch', hide_index=True)
+        st.download_button(
+            "Download new-entrant detail as CSV",
+            detail.to_csv(index=False).encode("utf-8"),
+            f"new_{role.lower().replace(' ', '_').replace('(', '').replace(')', '')}_{chosen_year}.csv",
+            "text/csv",
+            key="new_entrant_detail_download",
+        )
 
 
 def render_supplier_profile(portfolio, role, company):
