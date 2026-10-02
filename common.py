@@ -11,27 +11,54 @@ import streamlit as st
 DATA_PATH = "chemical_import_database.xlsx"
 
 
+def _clean_text_cols(df, cols, blank_defaults=None):
+    """Normalizes every column in `cols` to a plain stripped string, with no
+    stray NaN surviving as a float.
+
+    fillna has to run BEFORE astype(str), not after: pandas' (pyarrow-backed)
+    string dtype keeps a missing cell as an actual float NaN even once the
+    column is cast with astype(str) — astype(str) only stringifies values
+    that are already there, it doesn't stringify a missing one into "nan".
+    A column left this way silently mixes floats and strings, which blows up
+    the moment anything tries to sort or compare it (TypeError: '<' not
+    supported between instances of 'float' and 'str'). Filling every column
+    up front, not just the ones a past bug happened to touch, closes off the
+    whole class of bug rather than one column at a time.
+
+    `blank_defaults` can map a column name to what its blanks should read as
+    (e.g. "Unspecified") instead of the plain empty string every other
+    column gets.
+    """
+    blank_defaults = blank_defaults or {}
+    for col in cols:
+        default = blank_defaults.get(col, "")
+        df[col] = df[col].fillna(default).astype(str).str.strip()
+        df.loc[df[col] == "", col] = default
+    return df
+
+
 @st.cache_data
 def load_master_import():
     df = pd.read_excel(DATA_PATH, sheet_name="master_import")
-    # fillna BEFORE astype(str): pyarrow-backed string columns keep NaN as
-    # float, not the string "nan", so fillna has to happen first
-    df["formulation_type"] = df["formulation_type"].fillna("Unspecified")
-    for col in ["common_name", "concentration", "formulation_type", "origin"]:
-        df[col] = df[col].astype(str).str.strip()
+    df = _clean_text_cols(
+        df,
+        ["common_name", "concentration", "formulation_type", "origin", "category"],
+        blank_defaults={"formulation_type": "Unspecified", "category": "other"},
+    )
     return df
 
 
 @st.cache_data
 def load_reg_no():
     df = pd.read_excel(DATA_PATH, sheet_name="reg_no")
-    df["formulation_type"] = df["formulation_type"].fillna("Unspecified")
-    df["source_country"] = df["source_country"].fillna("")
-    for col in [
-        "reg_no", "common_name", "common_name_original", "concentration", "formulation_type",
-        "trade_name", "source", "source_country", "register", "importer", "distributor", "status", "category",
-    ]:
-        df[col] = df[col].astype(str).str.strip()
+    df = _clean_text_cols(
+        df,
+        [
+            "reg_no", "common_name", "common_name_original", "concentration", "formulation_type",
+            "trade_name", "source", "source_country", "register", "importer", "distributor", "status", "category",
+        ],
+        blank_defaults={"formulation_type": "Unspecified"},
+    )
     return df
 
 
