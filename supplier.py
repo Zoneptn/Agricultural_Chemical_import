@@ -129,22 +129,28 @@ def entrants_by_year(reg_df, role):
 def new_entrants(reg_df, role, year):
     """Entities for `role` whose first-ever issued registration falls in
     `year`, with how many registrations they've filed in total (through the
-    data's latest issued date, regardless of current active status) and how
-    many distinct chemicals/categories that spans."""
+    data's latest issued date, regardless of current active status), the
+    actual chemical/concentration/formulation combos that make up their
+    portfolio — the quickest way to spot what's about to launch — and how
+    many categories that spans."""
     col = ROLE_COLUMNS[role]
     first_year = first_seen_year(reg_df, role)
     entrant_names = first_year[first_year == year].index
 
-    cols = {role: [], "Registrations filed": [], "Distinct chemicals": [], "Categories": []}
+    cols = {role: [], "Chemicals": [], "Registrations filed": [], "Categories": []}
     if len(entrant_names) == 0:
         return pd.DataFrame(cols)
 
     view = _exploded_by_role(reg_df, role)
     view = view[view[col].isin(entrant_names)]
     for entity, sub in view.groupby(col):
+        combos = sub[["common_name", "concentration", "formulation_type"]].drop_duplicates()
+        chemicals = "; ".join(
+            f"{row.common_name} ({row.concentration}, {row.formulation_type})" for row in combos.itertuples()
+        )
         cols[role].append(entity)
+        cols["Chemicals"].append(chemicals)
         cols["Registrations filed"].append(len(sub))
-        cols["Distinct chemicals"].append(sub["common_name"].nunique())
         cols["Categories"].append(sub["category"].nunique())
     return pd.DataFrame(cols).sort_values("Registrations filed", ascending=False)
 
