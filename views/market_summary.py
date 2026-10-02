@@ -2,18 +2,15 @@ import streamlit as st
 
 from common import load_master_import, load_reg_no, reload_all
 from market import (
-    build_category_map,
-    with_category,
     render_keyword_aggregation,
     render_category_trend,
     render_origin_market_share,
+    render_concentration_index,
     render_movers_table,
 )
 
-df_raw = load_master_import()
+df = load_master_import()
 reg_df = load_reg_no()
-category_map = build_category_map(reg_df)
-df = with_category(df_raw, category_map)
 
 st.title("📊 Market Summary")
 st.caption("Keyword rollups, category trends, origin-country market share, and year-over-year movers across all chemical imports.")
@@ -38,6 +35,11 @@ st.divider()
 
 st.subheader("Top export countries to Thailand")
 render_origin_market_share(df)
+
+st.divider()
+
+st.subheader("Market concentration by category")
+render_concentration_index(df)
 
 st.divider()
 
