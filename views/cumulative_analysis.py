@@ -1,12 +1,9 @@
 import streamlit as st
 
-from common import load_master_import, load_reg_no, reload_all
-from market import build_category_map, with_category
+from common import load_master_import, reload_all
 from cumulative import render_cumulative_trend, render_pareto
 
-df_raw = load_master_import()
-reg_df = load_reg_no()
-df = with_category(df_raw, build_category_map(reg_df))
+df = load_master_import()
 
 st.title("📈 Cumulative Analysis")
 st.caption(
