@@ -7,6 +7,7 @@ from supplier import (
     manufacturing_country_options,
     company_portfolio,
     render_supplier_profile,
+    render_new_entrants,
 )
 
 reg_df = load_reg_no()
@@ -49,3 +50,12 @@ if company == PLACEHOLDER:
 else:
     portfolio = company_portfolio(reg_df, role, company, active_only)
     render_supplier_profile(portfolio, role, company)
+
+st.divider()
+
+st.subheader(f"New entrants by year — {role.lower()}s")
+st.caption(
+    f"Which {role.lower()}s first show up in reg_no each year (by their earliest issued registration), "
+    "and how much they've filed since — independent of the company picked above."
+)
+render_new_entrants(reg_df, role)
