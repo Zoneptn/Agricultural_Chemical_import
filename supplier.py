@@ -185,6 +185,27 @@ def new_entrant_by_distributor(reg_df, role, year):
     return out.sort_values("Registrations filed", ascending=False)
 
 
+def new_entrant_distributor_products(reg_df, role, year, distributor):
+    """One distributor's own slice of this year's new-entrant registrations,
+    at product level — same shape as new_entrant_products() but scoped to a
+    single distributor, so a rep can check exactly what one company is
+    bringing instead of reading the whole market-wide product table."""
+    cols = ["Chemical", "Concentration", "Formulation type", "Registrations filed"]
+    regs = _entrant_registrations(reg_df, role, year)
+    if regs.empty:
+        return pd.DataFrame(columns=cols)
+    scoped = regs[regs["distributor"] == distributor].drop_duplicates(subset=["reg_no"])
+    if scoped.empty:
+        return pd.DataFrame(columns=cols)
+    out = (
+        scoped.groupby(["common_name", "concentration", "formulation_type"])
+        .size()
+        .reset_index(name="Registrations filed")
+        .rename(columns={"common_name": "Chemical", "concentration": "Concentration", "formulation_type": "Formulation type"})
+    )
+    return out[cols].sort_values("Registrations filed", ascending=False)
+
+
 def new_entrant_detail(reg_df, role, year):
     """Every registration behind this year's new-entrant counts, at chemical
     level — which product (chemical, concentration, formulation type), which
@@ -259,10 +280,28 @@ def render_new_entrants(reg_df, role):
         by_company = new_entrant_by_company(reg_df, role, chosen_year)
         st.dataframe(by_company, width='stretch', hide_index=True)
 
-        if role != "Distributor":
+        if role == "Distributor":
+            distributor_names = by_company["Distributor"].tolist()
+        else:
             st.markdown("**By distributor**")
             by_distributor = new_entrant_by_distributor(reg_df, role, chosen_year)
             st.dataframe(by_distributor, width='stretch', hide_index=True)
+            distributor_names = by_distributor["Distributor"].tolist()
+
+        if distributor_names:
+            placeholder = "— Select —"
+            dist_choices = [placeholder] + distributor_names
+            if st.session_state.get("entrants_distributor_pick") not in dist_choices:
+                st.session_state["entrants_distributor_pick"] = placeholder
+            chosen_dist = st.selectbox(
+                "See one distributor's new products", dist_choices, key="entrants_distributor_pick"
+            )
+            if chosen_dist != placeholder:
+                dist_products = new_entrant_distributor_products(reg_df, role, chosen_year, chosen_dist)
+                st.dataframe(
+                    dist_products.style.format({"Registrations filed": "{:,.0f}"}),
+                    width='stretch', hide_index=True,
+                )
 
         detail = new_entrant_detail(reg_df, role, chosen_year)
         st.markdown(f"**What these new {role.lower()}s are bringing, by category — {chosen_year}**")
