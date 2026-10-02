@@ -23,10 +23,14 @@ ROLE_COLUMNS = {
 MULTI_VALUE_ROLES = {"Manufacturer (source)", "Manufacturing country"}
 
 DISPLAY_COLS = {
+    "distributor": "Distributor",
+    "source": "Source",
+    "register": "Register",
+    "importer": "Importer",
     "common_name": "Chemical",
-    "category": "Category",
     "concentration": "Concentration",
     "formulation_type": "Formulation type",
+    "category": "Category",
     "trade_name": "Trade name",
     "reg_no": "Reg. No.",
     "issued": "Issued",
