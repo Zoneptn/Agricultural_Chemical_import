@@ -25,7 +25,7 @@ if st.sidebar.button("🔄 Reload data"):
     reload_all()
     st.rerun()
 
-role = st.radio("View by", list(ROLE_COLUMNS.keys()), horizontal=True)
+role = st.radio("View by", list(ROLE_COLUMNS.keys()), horizontal=True, key="supplier_role")
 
 PLACEHOLDER = "— Select —"
 if role == "Manufacturer (source)":
@@ -40,8 +40,15 @@ elif role == "Manufacturing country":
 else:
     options = sorted(reg_df[ROLE_COLUMNS[role]].unique())
 
-company = st.selectbox(f"Choose a {role.lower()}", [PLACEHOLDER] + options)
-active_only = st.checkbox("Show only active (non-expired) registrations", value=True)
+valid_choices = [PLACEHOLDER] + options
+if st.session_state.get("supplier_company") not in valid_choices:
+    # clear a company left over from a previous role — e.g. an origin
+    # country picked under "Manufacturing country" isn't a valid choice
+    # after switching to "Importer", and Streamlit errors on a selectbox
+    # whose stored value isn't in its current options list
+    st.session_state["supplier_company"] = PLACEHOLDER
+company = st.selectbox(f"Choose a {role.lower()}", valid_choices, key="supplier_company")
+active_only = st.checkbox("Show only active (non-expired) registrations", value=True, key="supplier_active_only")
 
 st.divider()
 
