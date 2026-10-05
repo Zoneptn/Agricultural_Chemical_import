@@ -6,7 +6,6 @@ Matching is on a normalized key (lower-case, all whitespace removed), so
 "1-naphthylacetic acid" and "1-naphthylaceticacid" count as the same
 chemical.
 """
-import difflib
 import re
 
 import pandas as pd
@@ -106,21 +105,74 @@ def build_pool(plist, reg_df, master_df):
     ])
 
 
-def resolve_input(text, pool):
-    """Splits 'a+b+c' into ingredient keys. Returns (keys, unknown) where
-    unknown maps each unrecognised piece to close-match suggestions."""
-    known = pool.drop_duplicates("_ing").set_index("_ing")["ingredient"]
-    keys, unknown = [], {}
-    for piece in [p for p in text.split("+") if p.strip()]:
-        k = re.sub(r"\s+", "", piece.lower())
-        if k in known.index:
-            if k not in keys:
-                keys.append(k)
-        else:
-            near = difflib.get_close_matches(k, list(known.index), n=4, cutoff=0.7)
-            near += [x for x in known.index if k in x and x not in near][:4]
-            unknown[piece.strip()] = [known[x] for x in near[:5]]
-    return keys, unknown
+ALL = "All"
+
+
+@st.cache_data
+def build_entries(plist, reg_df, master_df):
+    """Distinct chemical / concentration / formulation combinations across the
+    three sheets, used to fill the dropdowns."""
+    cols = ["common_name", "concentration", "formulation_type"]
+    e = pd.concat([f[cols] for f in (plist, reg_df, master_df)]).drop_duplicates().copy()
+    e["name"] = e["common_name"].str.lower().str.replace(r"\s+", " ", regex=True).str.strip()
+    e["_combo"] = e["common_name"].map(combo_key)
+    e["_conc"] = _key(e["concentration"])
+    e["form"] = e["formulation_type"].map(_form_label)
+    return e
+
+
+def _strength_sort(k):
+    m = _STRENGTH.match(k)
+    return (float(m.group(1)) if m else float("inf"), k)
+
+
+def render_selectors(entries):
+    """Chemical / concentration / formulation dropdowns, narrowed by each
+    other. Leaving concentration and formulation on 'All' shows everything
+    for the chemical. Returns (combo_key, display_name, conc_key, form) or
+    None when no chemical is picked yet."""
+    placeholder = "— Select —"
+    first_name = entries.drop_duplicates("_combo").set_index("_combo")["name"]
+    name_to_combo = {n: c for c, n in first_name.items()}
+    names = [placeholder] + sorted(name_to_combo)
+
+    if st.session_state.get("plist_name") not in names:
+        st.session_state["plist_name"] = placeholder
+    chem = st.selectbox(
+        "Chemical (type to search; combinations are written a+b)", names, key="plist_name"
+    )
+    # a new chemical resets the other two
+    if st.session_state.get("plist_name_prev") != chem:
+        st.session_state["plist_name_prev"] = chem
+        st.session_state["plist_conc"] = ALL
+        st.session_state["plist_form"] = ALL
+    if chem == placeholder:
+        return None
+
+    combo = name_to_combo[chem]
+    sub = entries[entries["_combo"] == combo]
+
+    # sanitize stored picks against the options they'd now have, so a value
+    # left over from another selection never crashes the widget
+    conc_disp = sub.drop_duplicates("_conc").set_index("_conc")["concentration"].to_dict()
+    form_sel = st.session_state.get("plist_form", ALL)
+    conc_sub = sub if form_sel == ALL else sub[sub["form"] == form_sel]
+    conc_opts = [ALL] + sorted(conc_sub["_conc"].unique(), key=_strength_sort)
+    if st.session_state.get("plist_conc") not in conc_opts:
+        st.session_state["plist_conc"] = ALL
+    conc_sel = st.session_state["plist_conc"]
+    form_sub = sub if conc_sel == ALL else sub[sub["_conc"] == conc_sel]
+    form_opts = [ALL] + sorted(form_sub["form"].unique())
+    if st.session_state.get("plist_form") not in form_opts:
+        st.session_state["plist_form"] = ALL
+
+    c1, c2 = st.columns(2)
+    with c1:
+        conc = st.selectbox("Concentration", conc_opts, key="plist_conc",
+                            format_func=lambda k: ALL if k == ALL else conc_disp.get(k, k))
+    with c2:
+        form = st.selectbox("Formulation type", form_opts, key="plist_form")
+    return combo, chem, conc, form
 
 
 def alone_summary(pool, key):
@@ -163,36 +215,42 @@ def combination_check(pool, keys):
 
 def render_chemical_check(plist, reg_df, master_df):
     st.caption(
-        "Type one chemical (A) or a combination (A+B, A+B+C). For a combination you get each ingredient on its "
+        "Pick a chemical (A) or a combination (A+B, A+B+C). For a combination you get each ingredient on its "
         "own with its highest strength in any formulation, including technical grade, and whether the combination "
-        "is lower than the ingredient alone."
+        "is lower than the ingredient alone. Concentration and formulation type narrow the product tables only; "
+        "the “on its own” section always shows every formulation."
     )
     pool = build_pool(plist, reg_df, master_df)
-    text = st.text_input(
-        "Chemical or combination", placeholder="e.g. abamectin, or abamectin+emamectin benzoate", key="plist_query"
-    )
-    if not text.strip():
-        st.info("Type a chemical or a combination such as A+B to check it.")
+    entries = build_entries(plist, reg_df, master_df)
+    picked = render_selectors(entries)
+    if picked is None:
+        st.info("Pick a chemical or combination to check it. Concentration and formulation type are optional filters.")
         return
-    keys, unknown = resolve_input(text, pool)
-    for piece, near in unknown.items():
-        msg = f"“{piece}” isn't a chemical name found in the list, registrations or imports."
-        st.warning(msg + (f" Did you mean: {', '.join(near)}?" if near else ""))
-    if unknown or not keys:
-        return
-
-    names = pool.drop_duplicates("_ing").set_index("_ing")["ingredient"]
+    combo, chem, conc_sel, form_sel = picked
+    parts = [p.strip() for p in chem.split("+") if p.strip()]
+    keys = list(dict.fromkeys(re.sub(r"\s+", "", p.lower()) for p in parts))
+    names = {re.sub(r"\s+", "", p.lower()): p for p in parts}
     label = " + ".join(names[k] for k in keys)
+
+    def narrow(df, conc_col, form_col, form_is_label=False):
+        """Applies the concentration / formulation dropdown picks."""
+        out = df
+        if conc_sel != ALL:
+            out = out[_key(out[conc_col]) == conc_sel]
+        if form_sel != ALL:
+            forms = out[form_col] if form_is_label else out[form_col].map(_form_label)
+            out = out[forms == form_sel]
+        return out
 
     # 1. the combination on the list
     st.subheader(label)
-    combo = "|".join(sorted(keys))
     pl = plist.copy()
     pl["_combo"] = pl["common_name"].map(combo_key)
-    on_list = pl[pl["_combo"] == combo]
+    on_list = narrow(pl[pl["_combo"] == combo], "concentration", "formulation_type")
     st.markdown("**On the pesticide list**")
     if on_list.empty:
-        st.warning("This exact " + ("combination" if len(keys) > 1 else "chemical") + " is not an entry on the pesticide list.")
+        st.warning("No pesticide list entry for this " + ("combination" if len(keys) > 1 else "chemical")
+                   + (" with the selected concentration / formulation." if (conc_sel != ALL or form_sel != ALL) else "."))
     else:
         st.dataframe(
             on_list.rename(columns={
@@ -231,8 +289,10 @@ def render_chemical_check(plist, reg_df, master_df):
     if len(keys) > 1:
         st.markdown("**Combination vs each ingredient alone**")
         res = combination_check(pool, keys)
+        if not res.empty:
+            res = narrow(res, "concentration", "formulation", form_is_label=True)
         if res.empty:
-            st.info("No entry for exactly this combination in the pesticide list, registrations or imports.")
+            st.info("No entry with readable strengths for exactly this combination (and the selected concentration / formulation) in the pesticide list, registrations or imports.")
         else:
             counts = res["vs_top"].value_counts()
             st.caption(
@@ -267,7 +327,7 @@ def render_chemical_check(plist, reg_df, master_df):
     # 4. registrations + imports of this exact chemical/combination
     regs = reg_df.copy()
     regs["_combo"] = regs["common_name"].map(combo_key)
-    regs = regs[regs["_combo"] == combo].copy()
+    regs = narrow(regs[regs["_combo"] == combo], "concentration", "formulation_type").copy()
     st.markdown("**Registered products**")
     if regs.empty:
         st.info("No registrations for this " + ("combination" if len(keys) > 1 else "chemical") + " in reg_no.")
@@ -290,7 +350,7 @@ def render_chemical_check(plist, reg_df, master_df):
 
     imp = master_df.copy()
     imp["_combo"] = imp["common_name"].map(combo_key)
-    imp = imp[imp["_combo"] == combo]
+    imp = narrow(imp[imp["_combo"] == combo], "concentration", "formulation_type")
     st.markdown("**Imports**")
     if imp.empty:
         st.info("No imports recorded for this " + ("combination" if len(keys) > 1 else "chemical") + " in master_import.")
