@@ -63,6 +63,26 @@ def load_reg_no():
 
 
 @st.cache_data
+def load_pesticide_list():
+    """Official list of pesticides permitted for registration (one row per
+    chemical + concentration + formulation, tagged with the Royal Gazette
+    announcement it came from). The sheet carries blank trailing rows and a
+    few exact duplicates, which are dropped here."""
+    df = pd.read_excel(DATA_PATH, sheet_name="pesticide_list")
+    df = df.dropna(subset=["common_name"]).copy()
+    df = _clean_text_cols(
+        df,
+        ["common_name", "concentration", "formulation_type", "royal_gazette_volume"],
+        blank_defaults={"formulation_type": "Unspecified", "royal_gazette_volume": "Not stated"},
+    )
+    for col in ["common_name", "concentration", "formulation_type"]:
+        # a few cells carry stray line breaks / double spaces inside the text
+        df[col] = df[col].str.replace(r"\s+", " ", regex=True)
+    df = df.drop_duplicates(subset=["common_name", "concentration", "formulation_type", "royal_gazette_volume"])
+    return df.reset_index(drop=True)
+
+
+@st.cache_data
 def load_classifications():
     """IRAC (insecticides), HRAC (herbicides), FRAC (fungicides) mode-of-action
     tables, keyed by a normalized common_name for lookup."""
@@ -136,4 +156,5 @@ def aggregate_with_price(df, group_cols, qty_col="quantity_kg", value_col="value
 def reload_all():
     load_master_import.clear()
     load_reg_no.clear()
+    load_pesticide_list.clear()
     load_classifications.clear()
