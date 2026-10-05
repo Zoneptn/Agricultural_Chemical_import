@@ -211,3 +211,148 @@ def render_gaps(plist, reg_df, master_df):
     )
     st.caption(f"{len(unreg_tbl):,} chemicals")
     st.dataframe(unreg_tbl, hide_index=True)
+
+
+# ---------------------------------------------------------------------------
+# Mixture check: does an ingredient's strength in a mixture (a+b, a+b+c) fall
+# below the strength it is listed at on its own?
+# ---------------------------------------------------------------------------
+_NUMBER = re.compile(r"\d+(?:\.\d+)?")
+
+
+def _unit(conc):
+    m = re.search(r"W\s*/\s*([VW])", conc, re.I)
+    return f"W/{m.group(1).upper()}" if m else ""
+
+
+def parse_components(plist):
+    """One row per ingredient per list entry. Mixtures are '+'-separated in
+    both common_name and concentration and pair up by position; the unit
+    (W/V or W/W) is written once at the end and applies to every component.
+    Returns (components, skipped) where skipped are entries whose names and
+    strengths couldn't be paired or have no number."""
+    rows, skipped = [], []
+    for _, r in plist.iterrows():
+        names = [n.strip() for n in r["common_name"].split("+")]
+        concs = [c.strip() for c in r["concentration"].split("+")]
+        nums = [_NUMBER.search(c) for c in concs]
+        if len(names) != len(concs) or any(n is None for n in nums):
+            skipped.append(r)
+            continue
+        unit = _unit(r["concentration"])
+        for name, m in zip(names, nums):
+            rows.append({
+                "entry": r["common_name"], "ingredient": name, "_ing": re.sub(r"\s+", "", name.lower()),
+                "n_components": len(names), "conc": float(m.group()), "unit": unit,
+                "formulation_type": r["formulation_type"], "royal_gazette_volume": r["royal_gazette_volume"],
+            })
+    return pd.DataFrame(rows), pd.DataFrame(skipped)
+
+
+def solo_max(comps):
+    solo = comps[comps["n_components"] == 1]
+    return solo.groupby(["_ing", "formulation_type", "unit"], as_index=False)["conc"].max().rename(
+        columns={"conc": "solo_max"}
+    )
+
+
+def mixture_check(comps, selected_keys):
+    """Mixture entries containing every selected ingredient, one row per
+    (entry, selected ingredient), compared against that ingredient's highest
+    single-ingredient strength in the same formulation and unit."""
+    mixes = comps[comps["n_components"] > 1]
+    entry_keys = mixes.groupby(["entry", "formulation_type", "royal_gazette_volume"])["_ing"].agg(set)
+    ok = entry_keys[entry_keys.apply(lambda s: set(selected_keys) <= s)].index
+    sel = mixes.set_index(["entry", "formulation_type", "royal_gazette_volume"]).loc[ok].reset_index()
+    sel = sel[sel["_ing"].isin(selected_keys)]
+    out = sel.merge(solo_max(comps), on=["_ing", "formulation_type", "unit"], how="left")
+
+    def verdict(r):
+        if pd.isna(r["solo_max"]):
+            return "No single-ingredient entry (same formulation/unit)"
+        if abs(r["conc"] - r["solo_max"]) < 1e-9:
+            return "Same as solo max"
+        return "Lower than solo max" if r["conc"] < r["solo_max"] else "Higher than solo max"
+
+    out["Verdict"] = out.apply(verdict, axis=1)
+    out["% of solo max"] = (out["conc"] / out["solo_max"] * 100).round(1)
+    return out
+
+
+def max_concentration_table(comps, selected_keys):
+    """Highest strength per selected ingredient by formulation and unit,
+    alone and inside any mixture."""
+    sub = comps[comps["_ing"].isin(selected_keys)]
+    solo = sub[sub["n_components"] == 1].groupby(["_ing", "formulation_type", "unit"]).agg(
+        solo_max=("conc", "max"), solo_entries=("conc", "size"))
+    mix = sub[sub["n_components"] > 1].groupby(["_ing", "formulation_type", "unit"]).agg(
+        mix_max=("conc", "max"), mix_entries=("conc", "size"))
+    t = solo.join(mix, how="outer").reset_index()
+    names = comps.drop_duplicates("_ing").set_index("_ing")["ingredient"]
+    t["Ingredient"] = t["_ing"].map(names)
+    t = t.rename(columns={
+        "formulation_type": "Formulation type", "unit": "Unit", "solo_max": "Max alone (%)",
+        "solo_entries": "Entries alone", "mix_max": "Max in a mixture (%)", "mix_entries": "Entries in mixtures",
+    })
+    t["Unit"] = t["Unit"].replace("", "not stated")
+    for c in ["Entries alone", "Entries in mixtures"]:
+        t[c] = t[c].fillna(0).astype(int)
+    cols = ["Ingredient", "Formulation type", "Unit", "Max alone (%)", "Max in a mixture (%)", "Entries alone", "Entries in mixtures"]
+    return t[cols].sort_values(["Ingredient", "Formulation type", "Unit"])
+
+
+def render_mixture_check(plist):
+    st.caption(
+        "Pick one ingredient (A) to check every mixture that contains it, or several (A, B) to check only "
+        "mixtures that contain all of them. Each ingredient's strength in a mixture is compared with its "
+        "highest single-ingredient strength on the list in the same formulation type and unit."
+    )
+    comps, skipped = parse_components(plist)
+    mixtures = comps[comps["n_components"] > 1]
+    names = mixtures.drop_duplicates("_ing").set_index("_ing")["ingredient"]
+    options = sorted(names.index, key=lambda k: names[k].lower())
+
+    sel = st.multiselect(
+        "Ingredient(s)", options, format_func=lambda k: names[k], key="plist_mix_ings",
+        placeholder="e.g. abamectin, or abamectin + emamectin benzoate",
+    )
+    if not sel:
+        st.info("Pick an ingredient to see its maximum strengths and how it is used in mixtures.")
+        return
+
+    st.markdown("**Maximum strength on the list**")
+    st.dataframe(max_concentration_table(comps, sel), hide_index=True)
+
+    res = mixture_check(comps, sel)
+    st.markdown("**Mixtures containing " + " and ".join(names[k] for k in sel) + "**")
+    if res.empty:
+        st.info("No mixture on the list contains all of the selected ingredients.")
+    else:
+        n_entries = res.drop_duplicates(["entry", "formulation_type", "royal_gazette_volume"]).shape[0]
+        counts = res["Verdict"].value_counts()
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Mixture entries", f"{n_entries:,}")
+        c2.metric("Ingredient strengths lower than solo max", f"{counts.get('Lower than solo max', 0):,}")
+        c3.metric("No single-ingredient entry to compare", f"{counts.get('No single-ingredient entry (same formulation/unit)', 0):,}")
+        table = res.rename(columns={
+            "entry": "Mixture", "formulation_type": "Formulation type", "royal_gazette_volume": "Gazette volume",
+            "ingredient": "Ingredient", "conc": "Strength in mixture (%)", "unit": "Unit",
+            "solo_max": "Solo max (%)",
+        })
+        table["Unit"] = table["Unit"].replace("", "not stated")
+        table = table[["Mixture", "Formulation type", "Gazette volume", "Ingredient", "Strength in mixture (%)",
+                       "Unit", "Solo max (%)", "% of solo max", "Verdict"]].sort_values(["Mixture", "Ingredient"])
+        st.dataframe(table, hide_index=True)
+        st.download_button(
+            "⬇️ Download as CSV", table.to_csv(index=False).encode("utf-8-sig"),
+            file_name="pesticide_mixture_check.csv", mime="text/csv", key="plist_mix_dl",
+        )
+    if len(skipped):
+        st.caption(
+            f"{len(skipped)} list entr{'y' if len(skipped) == 1 else 'ies'} skipped because the ingredient names "
+            "and strengths couldn't be paired up (e.g. “… or …” alternatives or a missing strength)."
+        )
+    st.caption(
+        "Ingredients match by exact name, so different salt forms (e.g. glyphosate vs glyphosate "
+        "isopropylammonium) count as separate ingredients."
+    )
