@@ -70,6 +70,9 @@ def load_pesticide_list():
     few exact duplicates, which are dropped here."""
     df = pd.read_excel(DATA_PATH, sheet_name="pesticide_list")
     df = df.dropna(subset=["common_name"]).copy()
+    # a stray cell (e.g. a "False" left by a formula) can sit in a row with
+    # nothing else filled in; real entries always carry a strength
+    df = df.dropna(subset=["concentration", "formulation_type", "royal_gazette_volume"], how="all")
     df = _clean_text_cols(
         df,
         ["common_name", "concentration", "formulation_type", "royal_gazette_volume"],
