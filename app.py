@@ -9,6 +9,7 @@ market_page = st.Page("views/market_summary.py", title="Market Summary", icon="�
 supplier_page = st.Page("views/supplier_profile.py", title="Supplier Profile", icon="🏢")
 cumulative_page = st.Page("views/cumulative_analysis.py", title="Cumulative Analysis", icon="📈")
 benchmark_page = st.Page("views/shk_benchmark.py", title="SHK Benchmark", icon="📐")
+pesticide_page = st.Page("views/pesticide_list.py", title="Pesticide List", icon="📋")
 
-nav = st.navigation([overview_page, comparison_page, search_page, market_page, supplier_page, cumulative_page, benchmark_page])
+nav = st.navigation([overview_page, comparison_page, search_page, market_page, supplier_page, cumulative_page, benchmark_page, pesticide_page])
 nav.run()
