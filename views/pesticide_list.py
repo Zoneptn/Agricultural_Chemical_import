@@ -1,7 +1,7 @@
 import streamlit as st
 
 from common import load_pesticide_list, load_reg_no, load_master_import, reload_all
-from pesticide_checks import render_summary, render_search, render_chemical_check, render_gaps
+from pesticide_checks import render_summary, render_search, render_chemical_check, render_gaps, render_mixture_check
 
 plist = load_pesticide_list()
 reg_df = load_reg_no()
@@ -22,10 +22,12 @@ render_summary(plist)
 
 st.divider()
 
-tab_search, tab_check, tab_gaps = st.tabs(["Search the list", "Check a chemical", "Cross-check gaps"])
+tab_search, tab_check, tab_mix, tab_gaps = st.tabs(["Search the list", "Check a chemical", "Mixture check", "Cross-check gaps"])
 with tab_search:
     render_search(plist, reg_df, master_df)
 with tab_check:
     render_chemical_check(plist, reg_df, master_df)
+with tab_mix:
+    render_mixture_check(plist)
 with tab_gaps:
     render_gaps(plist, reg_df, master_df)
