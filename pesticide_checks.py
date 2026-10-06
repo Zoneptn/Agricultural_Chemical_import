@@ -52,6 +52,7 @@ def render_summary(plist):
 # Chemical / combination check
 # ---------------------------------------------------------------------------
 SOURCES = ["Pesticide list", "Registered", "Imported"]
+CHECK_SOURCES = ["Registered", "Imported"]  # sheets the pesticide list can be checked against
 _STRENGTH = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*%")
 TOLERANCE = 1e-9
 # technical-grade / reference-material labels, spelled several ways across the sheets
@@ -109,13 +110,11 @@ ALL = "All"
 
 
 @st.cache_data
-def build_entries(plist, reg_df, master_df):
-    """Distinct chemical / concentration / formulation combinations across the
-    three sheets, used to fill the dropdowns."""
+def build_entries(plist):
+    """Distinct chemical / concentration / formulation combinations on the
+    pesticide list, used to fill the dropdowns."""
     cols = ["common_name", "concentration", "formulation_type"]
-    e = pd.concat(
-        [f[cols].assign(source=name) for name, f in zip(SOURCES, (plist, reg_df, master_df))]
-    ).drop_duplicates().copy()
+    e = plist[cols].drop_duplicates().copy()
     # ingredients in alphabetical order so a+b and b+a show up as one entry
     e["name"] = e["common_name"].map(
         lambda n: "+".join(sorted(re.sub(r"\s+", " ", p.lower()).strip() for p in n.split("+") if p.strip()))
@@ -144,7 +143,9 @@ def render_selectors(entries):
     if st.session_state.get("plist_name") not in names:
         st.session_state["plist_name"] = placeholder
     chem = st.selectbox(
-        "Chemical (type to search; combinations are written a+b)", names, key="plist_name"
+        "Chemical (type to search; combinations are written a+b, ingredients in alphabetical order)",
+        names, key="plist_name",
+        help="Lists every chemical and combination on the pesticide list (pesticide_list sheet).",
     )
     # a new chemical resets the other two
     if st.session_state.get("plist_name_prev") != chem:
@@ -191,11 +192,15 @@ def alone_summary(pool, key):
 
 
 def combination_check(pool, keys):
-    """Entries that are exactly this combination, one row per ingredient,
-    compared with that ingredient's strength on its own: same formulation +
-    unit, and the highest in any formulation (including technical grade)."""
+    """Pesticide-list entries that are exactly this combination, one row per
+    ingredient, compared with that ingredient's strength on its own (from the
+    pool: the list plus whichever other sheets are checked against): same
+    formulation + unit, and the highest in any formulation (including
+    technical grade)."""
     combo = "|".join(sorted(keys))
-    entries = pool[(pool["_combo"] == combo) & (pool["n_components"] == len(keys))].copy()
+    entries = pool[
+        (pool["_combo"] == combo) & (pool["n_components"] == len(keys)) & (pool["source"] == "Pesticide list")
+    ].copy()
     if entries.empty:
         return entries
     solo = pool[pool["n_components"] == 1]
@@ -220,28 +225,24 @@ def combination_check(pool, keys):
 
 def render_chemical_check(plist, reg_df, master_df):
     st.caption(
-        "Pick a chemical (A) or a combination (A+B, A+B+C). For a combination you get each ingredient on its "
-        "own with its highest strength in any formulation, including technical grade, and whether the combination "
-        "is lower than the ingredient alone. Concentration and formulation type narrow the product tables only; "
-        "the “on its own” section always shows every formulation."
+        "Pick a chemical (A) or a combination (A+B, A+B+C) from the pesticide list. You see its list entries, "
+        "each ingredient on its own with its highest strength in any formulation (technical grade included), and "
+        "whether the combination is lower than the ingredient alone. “Check against” brings in registrations and "
+        "imports to compare the list with what is actually on the market."
     )
     c1, c2 = st.columns([3, 2])
     with c1:
         sources = st.multiselect(
-            "Check against", SOURCES, default=["Registered"], key="plist_sources",
-            help="The pesticide list can include chemicals that are never sold. Registered = products in reg_no "
-                 "(what is on the market); Imported = master_import.",
+            "Check the pesticide list against", CHECK_SOURCES, default=["Registered"], key="plist_sources",
+            help="Registered = products in reg_no (what is sold in the market); Imported = master_import. "
+                 "The pesticide list can contain chemicals that are never sold.",
         )
     with c2:
         active_only = st.checkbox("Only active (non-expired) registrations", value=True, key="plist_active")
-    if not sources:
-        st.info("Pick at least one source to check against.")
-        return
     reg_used = not_expired(reg_df) if active_only else reg_df
     pool = build_pool(plist, reg_used, master_df)
-    pool = pool[pool["source"].isin(sources)]
-    entries = build_entries(plist, reg_used, master_df)
-    entries = entries[entries["source"].isin(sources)]
+    pool = pool[pool["source"].isin(["Pesticide list"] + sources)]
+    entries = build_entries(plist)
     picked = render_selectors(entries)
     if picked is None:
         st.info("Pick a chemical or combination to check it. Concentration and formulation type are optional filters.")
@@ -269,12 +270,14 @@ def render_chemical_check(plist, reg_df, master_df):
     on_list = narrow(pl[pl["_combo"] == combo], "concentration", "formulation_type")
     st.markdown("**On the pesticide list**")
     regs_all = reg_used.copy()
+    check_reg = "Registered" in sources
     regs_all["_prod"] = regs_all["common_name"].map(combo_key) + "|" + _key(regs_all["concentration"]) + "|" + regs_all["formulation_type"].map(_form_label)
     reg_counts = regs_all.groupby("_prod")["reg_no"].nunique()
     on_list = on_list.copy()
     on_list["Registered products"] = (
         on_list["common_name"].map(combo_key) + "|" + _key(on_list["concentration"]) + "|" + on_list["formulation_type"].map(_form_label)
     ).map(reg_counts).fillna(0).astype(int)
+    show_cols = ["Chemical", "Concentration", "Formulation type", "Gazette volume"] + (["Registered products"] if check_reg else [])
     if on_list.empty:
         st.warning("No pesticide list entry for this " + ("combination" if len(keys) > 1 else "chemical")
                    + (" with the selected concentration / formulation." if (conc_sel != ALL or form_sel != ALL) else "."))
@@ -283,26 +286,27 @@ def render_chemical_check(plist, reg_df, master_df):
             on_list.rename(columns={
                 "common_name": "Chemical", "concentration": "Concentration",
                 "formulation_type": "Formulation type", "royal_gazette_volume": "Gazette volume",
-            })[["Chemical", "Concentration", "Formulation type", "Gazette volume", "Registered products"]],
+            })[show_cols],
             hide_index=True,
         )
-        st.caption(
-            "“Registered products” counts reg_no registrations with this exact chemical, strength and formulation"
-            + (" (active only)" if active_only else "")
-            + ". 0 means it is on the list but nothing is registered for it."
-        )
+        if check_reg:
+            st.caption(
+                "“Registered products” counts reg_no registrations with this exact chemical, strength and formulation"
+                + (" (active only)" if active_only else "")
+                + ". 0 means it is on the list but nothing is registered for it."
+            )
 
     # 2. each ingredient alone
     st.markdown("**Each ingredient on its own**" if len(keys) > 1 else "**On its own**")
     st.caption(
-        "Strengths of single-ingredient entries from: " + ", ".join(sources) + ". "
+        "Strengths of single-ingredient entries from: " + ", ".join(["Pesticide list"] + sources) + ". "
         "Technical grade and analytical standards appear here with their own (higher) strengths."
     )
     for k in keys:
         alone = alone_summary(pool, k)
         st.markdown(f"_{names[k]}_")
         if alone.empty:
-            st.info(f"No single-ingredient entry for {names[k]} in the list, registrations or imports.")
+            st.info(f"No single-ingredient entry for {names[k]} in " + ", ".join(["Pesticide list"] + sources) + ".")
             continue
         top = alone.iloc[0]
         formulated = alone[~alone["Formulation type"].isin(TECHNICAL_FORMS)]
@@ -324,7 +328,7 @@ def render_chemical_check(plist, reg_df, master_df):
         if not res.empty:
             res = narrow(res, "concentration", "formulation", form_is_label=True)
         if res.empty:
-            st.info("No entry with readable strengths for exactly this combination (and the selected concentration / formulation) in " + ", ".join(sources) + ".")
+            st.info("No pesticide list entry with readable strengths for exactly this combination (and the selected concentration / formulation).")
         else:
             counts = res["vs_top"].value_counts()
             st.caption(
@@ -341,17 +345,17 @@ def render_chemical_check(plist, reg_df, master_df):
             })
             table["Unit"] = table["Unit"].replace("", "not stated")
             table = table[[
-                "Source", "Combination", "Concentration", "Formulation type", "Gazette volume", "Ingredient",
+                "Combination", "Concentration", "Formulation type", "Gazette volume", "Ingredient",
                 "Strength in combination (%)", "Unit", "Alone, same formulation (%)", "vs same formulation",
                 "Alone, highest (%)", "Highest alone is in", "% of highest alone", "vs highest alone",
-            ]].sort_values(["Source", "Combination", "Ingredient"])
+            ]].sort_values(["Combination", "Ingredient"])
             st.dataframe(table, hide_index=True)
             st.download_button(
                 "⬇️ Download as CSV", table.to_csv(index=False).encode("utf-8-sig"),
                 file_name="pesticide_combination_check.csv", mime="text/csv", key="plist_dl",
             )
             st.caption(
-                "“Same formulation” compares only with a single-ingredient entry of the same formulation type and "
+                "Rows are the pesticide list's own entries. “Same formulation” compares only with a single-ingredient entry of the same formulation type and "
                 "unit (W/V or W/W). “Highest alone” compares with the highest strength in any formulation or "
                 "unit, so it is the stricter test."
             )
@@ -360,8 +364,11 @@ def render_chemical_check(plist, reg_df, master_df):
     regs = reg_used.copy()
     regs["_combo"] = regs["common_name"].map(combo_key)
     regs = narrow(regs[regs["_combo"] == combo], "concentration", "formulation_type").copy()
-    st.markdown("**Registered products**")
-    if regs.empty:
+    if check_reg:
+        st.markdown("**Registered products**")
+    if not check_reg:
+        pass
+    elif regs.empty:
         st.info("No registrations for this " + ("combination" if len(keys) > 1 else "chemical") + " in reg_no.")
     else:
         listed = {(_key(pd.Series([c])).iloc[0], _key(pd.Series([f])).iloc[0])
@@ -383,8 +390,11 @@ def render_chemical_check(plist, reg_df, master_df):
     imp = master_df.copy()
     imp["_combo"] = imp["common_name"].map(combo_key)
     imp = narrow(imp[imp["_combo"] == combo], "concentration", "formulation_type")
-    st.markdown("**Imports**")
-    if imp.empty:
+    if "Imported" in sources:
+        st.markdown("**Imports**")
+    if "Imported" not in sources:
+        pass
+    elif imp.empty:
         st.info("No imports recorded for this " + ("combination" if len(keys) > 1 else "chemical") + " in master_import.")
     else:
         by_year = imp.groupby("year", as_index=False)["quantity_kg"].sum().rename(
