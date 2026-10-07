@@ -115,9 +115,10 @@ def build_entries(plist):
     pesticide list, used to fill the dropdowns."""
     cols = ["common_name", "concentration", "formulation_type"]
     e = plist[cols].drop_duplicates().copy()
-    # ingredients in alphabetical order so a+b and b+a show up as one entry
+    # shown as written on the list (first occurrence wins); a+b and b+a are
+    # still one dropdown entry because they share a _combo key
     e["name"] = e["common_name"].map(
-        lambda n: "+".join(sorted(re.sub(r"\s+", " ", p.lower()).strip() for p in n.split("+") if p.strip()))
+        lambda n: "+".join(re.sub(r"\s+", " ", p.lower()).strip() for p in n.split("+") if p.strip())
     )
     e["_combo"] = e["common_name"].map(combo_key)
     e["_conc"] = _key(e["concentration"])
@@ -179,9 +180,10 @@ def render_selectors(entries):
     if st.session_state.get("plist_name") not in names:
         st.session_state["plist_name"] = placeholder
     chem = st.selectbox(
-        "Chemical (combinations are written a+b, ingredients in alphabetical order)",
+        "Chemical (combinations are written a+b, in the order used on the pesticide list)",
         names, key="plist_name",
-        help="Chemicals and combinations on the pesticide list (pesticide_list sheet), narrowed by the filter above.",
+        help="Chemicals and combinations on the pesticide list (pesticide_list sheet), narrowed by the filter above. "
+             "The same ingredients written in a different order (a+b and b+a) are one entry.",
     )
     # a new chemical resets the other two
     if st.session_state.get("plist_name_prev") != chem:
