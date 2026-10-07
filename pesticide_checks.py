@@ -130,6 +130,25 @@ def _strength_sort(k):
     return (float(m.group(1)) if m else float("inf"), k)
 
 
+def _match_text(text):
+    """Lower-case, with sulphur spelled sulfur, for filter matching only."""
+    return re.sub(r"\s+", " ", text.lower()).replace("sulph", "sulf").strip()
+
+
+def filter_names(names, query, partial):
+    """Names matching the typed filter. Default is whole-word: 'sulfur' finds
+    sulfur, sulfur+tebuconazole, ... but not pyrazosulfuron (where it is only
+    part of a longer word). '+', '-', spaces, commas and brackets count as
+    word boundaries. `partial` switches to plain 'contains'."""
+    q = _match_text(query)
+    if not q:
+        return list(names)
+    if partial:
+        return [n for n in names if q in _match_text(n)]
+    pattern = re.compile(r"(?<![a-z0-9])" + re.escape(q) + r"(?![a-z0-9])")
+    return [n for n in names if pattern.search(_match_text(n))]
+
+
 def render_selectors(entries):
     """Chemical / concentration / formulation dropdowns, narrowed by each
     other. Leaving concentration and formulation on 'All' shows everything
@@ -138,14 +157,31 @@ def render_selectors(entries):
     placeholder = "— Select —"
     first_name = entries.drop_duplicates("_combo").set_index("_combo")["name"]
     name_to_combo = {n: c for c, n in first_name.items()}
-    names = [placeholder] + sorted(name_to_combo)
+    all_names = sorted(name_to_combo)
+
+    # Streamlit's own dropdown search is fuzzy (it matches letters in order,
+    # even scattered through a longer name), so this filter narrows the list
+    # first with an exact whole-word match
+    f1, f2 = st.columns([3, 2])
+    with f1:
+        query = st.text_input(
+            "Filter chemicals", key="plist_filter", placeholder="e.g. sulfur, abamectin, copper sulfate",
+            help="Whole-word match: “sulfur” finds sulfur and its combinations, not pyrazosulfuron. "
+                 "sulphur and sulfur are treated the same.",
+        )
+    with f2:
+        partial = st.checkbox("Match part of a word (e.g. “sulfur” also finds metsulfuron)", key="plist_partial")
+    matches = filter_names(all_names, query, partial)
+    if query.strip():
+        st.caption(f"{len(matches):,} of {len(all_names):,} chemicals match “{query.strip()}”.")
+    names = [placeholder] + matches
 
     if st.session_state.get("plist_name") not in names:
         st.session_state["plist_name"] = placeholder
     chem = st.selectbox(
-        "Chemical (type to search; combinations are written a+b, ingredients in alphabetical order)",
+        "Chemical (combinations are written a+b, ingredients in alphabetical order)",
         names, key="plist_name",
-        help="Lists every chemical and combination on the pesticide list (pesticide_list sheet).",
+        help="Chemicals and combinations on the pesticide list (pesticide_list sheet), narrowed by the filter above.",
     )
     # a new chemical resets the other two
     if st.session_state.get("plist_name_prev") != chem:
