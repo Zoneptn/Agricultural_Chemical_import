@@ -1,6 +1,6 @@
 import streamlit as st
 
-from common import load_master_import, load_reg_no, reload_all
+from common import load_master_import, load_reg_no, load_classifications, reload_all
 from market import (
     render_keyword_aggregation,
     render_category_trend,
@@ -8,6 +8,7 @@ from market import (
     render_concentration_index,
     render_movers_table,
 )
+from aggregate import render_product_aggregation, render_group_aggregation
 
 df = load_master_import()
 reg_df = load_reg_no()
@@ -20,8 +21,14 @@ if st.sidebar.button("🔄 Reload data"):
     reload_all()
     st.rerun()
 
-st.subheader("Aggregate by keyword")
-render_keyword_aggregation(df, reg_df)
+st.subheader("Aggregate imports")
+tab_kw, tab_prod, tab_group = st.tabs(["By keyword", "By specific products", "By IRAC / HRAC / FRAC group"])
+with tab_kw:
+    render_keyword_aggregation(df, reg_df)
+with tab_prod:
+    render_product_aggregation(df)
+with tab_group:
+    render_group_aggregation(df, load_classifications())
 
 st.divider()
 
