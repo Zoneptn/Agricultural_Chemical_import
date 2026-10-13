@@ -304,7 +304,14 @@ def map_products(names, tables, system):
     return pd.concat(rows, ignore_index=True)
 
 
-LEVELS = {"Code": "label_code", "Chemical group within code": "label_group"}
+# Levels offered per system. Chemical group is only worth a level where codes really contain
+# several groups (HRAC: 14 of 28 codes); in IRAC each code has one class and in FRAC almost
+# always one, so it would just repeat Code. Main group exists only for IRAC (1A + 1B -> 1).
+SYSTEM_LEVELS = {
+    "IRAC": {"Code": "label_code", "Main group (1A + 1B → 1)": "label_main"},
+    "HRAC": {"Code": "label_code", "Chemical group within code": "label_group"},
+    "FRAC": {"Code": "label_code"},
+}
 
 
 def render_group_aggregation(df, tables):
@@ -316,11 +323,13 @@ def render_group_aggregation(df, tables):
     with c1:
         system = st.radio("System", list(SYSTEM_CATEGORIES), key="agg_system", horizontal=True,
                           format_func=lambda s: f"{s}", help=", ".join(f"{k}: {v}" for k, v in SYSTEM_BLURB.items()))
-    levels = dict(LEVELS)
-    if system == "IRAC":
-        levels = {"Main group (1A + 1B → 1)": "label_main", **levels}
+    levels = SYSTEM_LEVELS[system]
     with c2:
-        level_name = st.radio("Level", list(levels), key=f"agg_level_{system}", horizontal=True)
+        if len(levels) > 1:
+            level_name = st.radio("Level", list(levels), key=f"agg_level_{system}", horizontal=True)
+        else:
+            level_name = next(iter(levels))
+            st.caption("Level: code")
     with c3:
         metric_name = st.selectbox("Measure", list(METRICS), key="agg_grp_metric")
     label_col = levels[level_name]
