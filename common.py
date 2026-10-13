@@ -4,6 +4,7 @@ Everything here is pure data — no widgets, no chart rendering. UI-specific
 logic lives in filters.py, charts.py, registrations.py, and comparison.py.
 """
 import datetime
+import re
 
 import pandas as pd
 import streamlit as st
@@ -124,6 +125,27 @@ def classify_by_component(common_name, tables):
                 })
         breakdown.append({"component": comp_stripped, "matches": matches})
     return breakdown
+
+
+def match_text(text):
+    """Lower-case, with sulphur spelled sulfur, for filter matching only."""
+    return re.sub(r"\s+", " ", str(text).lower()).replace("sulph", "sulf").strip()
+
+
+def filter_names(names, query, partial=False):
+    """Names matching a typed filter. Default is whole-word: 'sulfur' finds
+    sulfur, sulfur+tebuconazole, ... but not pyrazosulfuron (where it is only
+    part of a longer word). '+', '-', spaces, commas and brackets count as
+    word boundaries. `partial` switches to plain 'contains'. Streamlit's own
+    dropdown search is fuzzy (letters in order, even scattered), so lists are
+    narrowed with this first."""
+    q = match_text(query)
+    if not q:
+        return list(names)
+    if partial:
+        return [n for n in names if q in match_text(n)]
+    pattern = re.compile(r"(?<![a-z0-9])" + re.escape(q) + r"(?![a-z0-9])")
+    return [n for n in names if pattern.search(match_text(n))]
 
 
 def not_expired(reg_df):
