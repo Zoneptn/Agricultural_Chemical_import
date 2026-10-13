@@ -80,66 +80,129 @@ def render_result(rows, label_col, metric_name, key):
 
 
 # ---------------------------------------------------------------------------
-# 1. Specific products
+# 1. Specific products: up to 25 rows of chemical / concentration / formulation
 # ---------------------------------------------------------------------------
+MAX_ROWS = 25
+PLACEHOLDER = "— Select —"
+ANY = "All"
+
+
+def _strength_key(k):
+    m = re.match(r"\s*(\d+(?:\.\d+)?)", k)
+    return (float(m.group(1)) if m else float("inf"), k)
+
+
 def render_product_aggregation(df):
-    """Pick exact chemical + concentration + formulation products, then sum."""
-    products = df[["common_name", "concentration", "formulation_type"]].drop_duplicates().copy()
-    products["label"] = _label_product(products)
-    all_labels = sorted(products["label"])
+    """Up to 25 rows, each a chemical + concentration + formulation type
+    chosen from dropdowns (concentration and formulation narrow to what that
+    chemical actually has; 'All' leaves one open), summed by year."""
+    combos = df[["common_name", "concentration", "formulation_type"]].drop_duplicates()
+    all_names = sorted(combos["common_name"].unique())
+    name_set = set(all_names)
 
     st.caption(
-        "Find chemicals with the filter, then pick the exact products you want — a chemical, its strength "
-        "and its formulation — across as many chemicals as you like."
+        f"Build a list of up to {MAX_ROWS} products. For each row pick a chemical, then optionally a "
+        "concentration and a formulation type (leave them on “All” to include every strength or formulation "
+        "of that chemical). The rows are added together."
     )
-    f1, f2 = st.columns([3, 2])
-    with f1:
-        query = st.text_input("Filter products", key="agg_prod_filter",
-                              placeholder="e.g. abamectin, copper sulfate, 1.8%, EC",
-                              help="Whole-word match on the product text (chemical, strength, formulation).")
-    with f2:
+    t1, t2, t3 = st.columns([1, 3, 2])
+    with t1:
+        n_rows = st.number_input("Rows", min_value=1, max_value=MAX_ROWS, value=5, step=1, key="agg_nrows")
+    with t2:
+        query = st.text_input(
+            "Filter the chemical lists", key="agg_prod_filter", placeholder="e.g. abamectin, copper sulfate",
+            help="Whole-word match; narrows the chemical dropdown in every row. "
+                 "A row keeps its chemical even if the filter would hide it.",
+        )
+    with t3:
         partial = st.checkbox("Match part of a word", key="agg_prod_partial")
-    shown = filter_names(all_labels, query, partial)
+    matches = set(filter_names(all_names, query, partial))
 
-    selected = [p for p in st.session_state.get("agg_products", []) if p in set(all_labels)]
-    st.session_state["agg_products"] = selected  # drop picks that no longer exist
-    options = sorted(set(shown) | set(selected))
+    heads = st.columns([3, 2, 2])
+    specs = []
+    for i in range(int(n_rows)):
+        kc, kk, kf, kp = (f"agg_r{i}_{x}" for x in ("chem", "conc", "form", "prev"))
 
-    def add_all_shown():
-        cur = st.session_state.get("agg_products", [])
-        st.session_state["agg_products"] = sorted(set(cur) | set(shown))
+        # --- sanitize this row's stored picks before its widgets exist ---
+        chem = st.session_state.get(kc, PLACEHOLDER)
+        if chem != PLACEHOLDER and chem not in name_set:
+            chem = st.session_state[kc] = PLACEHOLDER
+        if st.session_state.get(kp) != chem:           # new chemical: reset strength / formulation
+            st.session_state[kp] = chem
+            st.session_state[kk] = ANY
+            st.session_state[kf] = ANY
+        sub = combos[combos["common_name"] == chem] if chem != PLACEHOLDER else combos.iloc[0:0]
+        form_sel = st.session_state.get(kf, ANY)
+        conc_sub = sub if form_sel == ANY else sub[sub["formulation_type"] == form_sel]
+        conc_opts = [ANY] + sorted(conc_sub["concentration"].unique(), key=_strength_key)
+        if st.session_state.get(kk) not in conc_opts:
+            st.session_state[kk] = ANY
+        conc_sel = st.session_state[kk]
+        form_sub = sub if conc_sel == ANY else sub[sub["concentration"] == conc_sel]
+        form_opts = [ANY] + sorted(form_sub["formulation_type"].unique())
+        if st.session_state.get(kf) not in form_opts:
+            st.session_state[kf] = ANY
 
-    b1, b2 = st.columns([1, 4])
-    with b1:
-        st.button(f"Add all {len(shown):,} shown", on_click=add_all_shown, disabled=not (0 < len(shown) <= 60),
-                  help="Available when 60 products or fewer match the filter.", key="agg_add_all")
-    with b2:
-        st.caption(f"{len(shown):,} of {len(all_labels):,} products match the filter; {len(selected)} picked.")
-    st.multiselect("Products", options, key="agg_products", placeholder="Pick one or more products")
+        chem_opts = [PLACEHOLDER] + sorted(matches | ({chem} if chem != PLACEHOLDER else set()))
+        cols = st.columns([3, 2, 2])
+        first = i == 0
+        vis = "visible" if first else "collapsed"
+        with cols[0]:
+            chem = st.selectbox(f"Chemical name (row {i + 1})" if not first else "Chemical name", chem_opts,
+                                key=kc, label_visibility=vis)
+        with cols[1]:
+            conc = st.selectbox(f"Concentration (row {i + 1})" if not first else "Concentration", conc_opts,
+                                key=kk, label_visibility=vis, disabled=chem == PLACEHOLDER)
+        with cols[2]:
+            form = st.selectbox(f"Formulation type (row {i + 1})" if not first else "Formulation type", form_opts,
+                                key=kf, label_visibility=vis, disabled=chem == PLACEHOLDER)
+        if chem != PLACEHOLDER:
+            spec = (chem, conc, form)
+            if spec not in specs:
+                specs.append(spec)
 
-    picked = st.session_state.get("agg_products", [])
-    if not picked:
-        st.info("Pick one or more products above to sum their imports by year.")
+    if not specs:
+        st.info("Pick a chemical in at least one row to sum its imports by year.")
         return
 
-    c1, c2 = st.columns(2)
+    c1, c2 = st.columns([3, 2])
     with c1:
         mode = st.radio(
-            "Show", ["By chemical", "Each product", "All picked as one total"], key="agg_prod_mode", horizontal=True,
-            help="By chemical adds up the picked strengths and formulations of each chemical into one line.",
+            "Show", ["One total", "Each row", "By chemical", "Each row + total"], key="agg_prod_mode", horizontal=True,
+            help="One total adds all rows together. By chemical adds up the rows of each chemical.",
         )
     with c2:
         metric_name = st.selectbox("Measure", list(METRICS), key="agg_prod_metric")
 
-    rows = df.assign(_label=_label_product(df))
-    rows = rows[rows["_label"].isin(picked)].copy()
+    def label(spec):
+        chem, conc, form = spec
+        return " · ".join([chem, "all strengths" if conc == ANY else conc, "all formulations" if form == ANY else form])
+
+    rows_df = df.reset_index().rename(columns={"index": "_row"})
+    per_spec = []
+    for spec in specs:
+        chem, conc, form = spec
+        m = rows_df["common_name"] == chem
+        if conc != ANY:
+            m &= rows_df["concentration"] == conc
+        if form != ANY:
+            m &= rows_df["formulation_type"] == form
+        per_spec.append(rows_df[m].assign(_group=label(spec)))
+    union = pd.concat(per_spec).drop_duplicates("_row")  # a shipment matched by two rows counts once
+
+    parts = []
+    if mode in ("Each row", "Each row + total"):
+        parts.append(pd.concat(per_spec))
+    if mode in ("One total", "Each row + total"):
+        parts.append(union.assign(_group=f"Total of {len(specs)} selected product{'s' if len(specs) != 1 else ''}"))
     if mode == "By chemical":
-        rows["_group"] = rows["common_name"]
-    elif mode == "Each product":
-        rows["_group"] = rows["_label"]
-    else:
-        rows["_group"] = f"{len(picked)} picked products"
-    render_result(rows, "_group", metric_name, "agg_products_result")
+        parts.append(union.assign(_group=union["common_name"]))
+
+    st.caption(f"{len(union):,} shipments matched across {len(specs)} row{'s' if len(specs) != 1 else ''}.")
+    if sum(len(p) for p in per_spec) > len(union) and mode in ("Each row", "Each row + total"):
+        st.caption("Some rows overlap (for example “All” strengths plus one specific strength of the same chemical), "
+                   "so separate rows can add up to more than the total, which counts each shipment once.")
+    render_result(pd.concat(parts, ignore_index=True), "_group", metric_name, "agg_products_result")
 
 
 # ---------------------------------------------------------------------------
