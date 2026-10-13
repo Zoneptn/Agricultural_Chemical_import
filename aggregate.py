@@ -29,6 +29,15 @@ def _label_product(df):
     return df["common_name"] + " · " + df["concentration"] + " · " + df["formulation_type"]
 
 
+def natural_key(label):
+    """Sort key for a code label like '10A — Nicotinic …' or '4 · Group':
+    numbers in numeric order (1, 1A, 1B, 2, … 10, 11, 12/32, 16.1), then
+    letter codes (M1, NC, UN) after them."""
+    code = re.split(r" — | · ", str(label))[0]
+    tokens = re.findall(r"\d+(?:\.\d+)?|[A-Za-z]+", code) or [code]
+    return [(0, float(t), "") if t[0].isdigit() else (1, 0.0, t.upper()) for t in tokens]
+
+
 def aggregate_metric(rows, label_col, metric):
     """Long table year x label x value for the chosen metric. Price uses
     aggregate_with_price, which ignores rows with no recorded value (2024 and
@@ -39,7 +48,7 @@ def aggregate_metric(rows, label_col, metric):
     return rows.groupby(["year", label_col], as_index=False)[metric].sum().rename(columns={metric: "value"})
 
 
-def render_result(rows, label_col, metric_name, key):
+def render_result(rows, label_col, metric_name, key, order_key=None):
     """Chart + year-by-year table + CSV for rows that already carry a label
     column. `rows` may repeat a master_import row under several labels (a
     mixture counted under each of its codes)."""
@@ -59,10 +68,13 @@ def render_result(rows, label_col, metric_name, key):
     pivot = pivot.sort_values("Total", ascending=False)
     pivot.columns = [str(c) for c in pivot.columns]
 
-    order = list(pivot.index)
-    shown = order[:MAX_LINES]
-    if len(order) > MAX_LINES:
-        st.caption(f"Chart shows the {MAX_LINES} largest of {len(order)} lines; the table lists all of them.")
+    by_volume = list(pivot.index)
+    shown = by_volume[:MAX_LINES]
+    if len(by_volume) > MAX_LINES:
+        st.caption(f"Chart shows the {MAX_LINES} largest of {len(by_volume)} lines; the table lists all of them.")
+    if order_key:  # e.g. code order for IRAC / HRAC / FRAC: table and chart legend follow it
+        pivot = pivot.loc[sorted(pivot.index, key=order_key)]
+        shown = sorted(shown, key=order_key)
     fig = px.line(
         long[long[label_col].isin(shown)], x="year", y="value", color=label_col, markers=True,
         category_orders={label_col: shown}, labels={"value": metric_name, "year": "Year", label_col: ""},
@@ -341,19 +353,20 @@ def render_group_aggregation(df, tables):
         st.info(f"No imports matched to {system} codes.")
         return
 
-    codes_by_volume = (rows.groupby(label_col)["quantity_kg"].sum().sort_values(ascending=False))
+    codes_by_volume = rows.groupby(label_col)["quantity_kg"].sum()
+    code_order = sorted(codes_by_volume.index, key=natural_key)
     codes_key = f"agg_codes_{system}_{label_col}"
     valid = set(codes_by_volume.index)
     if codes_key in st.session_state:  # drop picks that no longer exist (e.g. after toggling mixtures)
         st.session_state[codes_key] = [c for c in st.session_state[codes_key] if c in valid]
     picks = st.multiselect(
-        f"{system} codes (leave empty for all)", list(codes_by_volume.index), key=codes_key,
-        help="Ordered by import volume. Typing searches the list.",
+        f"{system} codes (leave empty for all)", code_order, key=codes_key,
+        help="Listed in code order (1, 1A, 1B, 2 … 10, 11; letter codes last). Typing searches the list.",
     )
     show = st.radio("Show", ["Each separately", "Combined into one total", "Each + combined total"],
                     key="agg_show", horizontal=True)
 
-    chosen = picks or list(codes_by_volume.index)
+    chosen = picks or code_order
     sel = rows[rows[label_col].isin(chosen)]
     parts = []
     if show in ("Each separately", "Each + combined total"):
@@ -362,7 +375,13 @@ def render_group_aggregation(df, tables):
         combined = sel.drop_duplicates("_row")  # a product in several chosen codes counts once
         name = f"All {len(chosen)} codes combined" if not picks else f"Combined: {len(chosen)} selected"
         parts.append(combined.assign(_group=name))
-    render_result(pd.concat(parts, ignore_index=True), "_group", metric_name, f"agg_{system.lower()}_result")
+    combined_names = set(pd.concat(parts)["_group"]) - set(chosen)  # the combined-total line goes first
+
+    def order_key(g):
+        return (0, []) if g in combined_names else (1, natural_key(g))
+
+    render_result(pd.concat(parts, ignore_index=True), "_group", metric_name, f"agg_{system.lower()}_result",
+                  order_key=order_key)
 
     if len(picks) > 1 or show != "Each separately":
         st.caption(
