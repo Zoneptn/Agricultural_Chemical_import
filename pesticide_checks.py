@@ -11,7 +11,7 @@ import re
 import pandas as pd
 import streamlit as st
 
-from common import not_expired
+from common import filter_names, not_expired
 
 AWAITING = "Awaiting announcement"
 
@@ -129,25 +129,6 @@ def build_entries(plist):
 def _strength_sort(k):
     m = _STRENGTH.match(k)
     return (float(m.group(1)) if m else float("inf"), k)
-
-
-def _match_text(text):
-    """Lower-case, with sulphur spelled sulfur, for filter matching only."""
-    return re.sub(r"\s+", " ", text.lower()).replace("sulph", "sulf").strip()
-
-
-def filter_names(names, query, partial):
-    """Names matching the typed filter. Default is whole-word: 'sulfur' finds
-    sulfur, sulfur+tebuconazole, ... but not pyrazosulfuron (where it is only
-    part of a longer word). '+', '-', spaces, commas and brackets count as
-    word boundaries. `partial` switches to plain 'contains'."""
-    q = _match_text(query)
-    if not q:
-        return list(names)
-    if partial:
-        return [n for n in names if q in _match_text(n)]
-    pattern = re.compile(r"(?<![a-z0-9])" + re.escape(q) + r"(?![a-z0-9])")
-    return [n for n in names if pattern.search(_match_text(n))]
 
 
 def render_selectors(entries):
