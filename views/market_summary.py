@@ -22,7 +22,7 @@ if st.sidebar.button("🔄 Reload data"):
     st.rerun()
 
 st.subheader("Aggregate imports")
-tab_kw, tab_prod, tab_group = st.tabs(["By keyword", "By specific products", "By IRAC / HRAC / FRAC group"])
+tab_kw, tab_prod, tab_group = st.tabs(["By keyword", "By chemical · strength · formulation", "By IRAC / HRAC / FRAC group"])
 with tab_kw:
     render_keyword_aggregation(df, reg_df)
 with tab_prod:
