@@ -144,7 +144,15 @@ def render_selectors(entries):
     # Streamlit's own dropdown search is fuzzy (it matches letters in order,
     # even scattered through a longer name), so this filter narrows the list
     # first with an exact whole-word match
-    f1, f2 = st.columns([3, 2])
+    def clear_search():
+        # runs before the widgets are drawn on the next rerun, so their keys can be reset here
+        st.session_state["plist_filter"] = ""
+        st.session_state["plist_partial"] = False
+        st.session_state["plist_name"] = placeholder
+        st.session_state["plist_conc"] = ALL
+        st.session_state["plist_form"] = ALL
+
+    f1, f2, f3 = st.columns([3, 3, 1])
     with f1:
         query = st.text_input(
             "Filter chemicals", key="plist_filter", placeholder="e.g. sulfur, abamectin, copper sulfate",
@@ -153,6 +161,9 @@ def render_selectors(entries):
         )
     with f2:
         partial = st.checkbox("Match part of a word (e.g. “sulfur” also finds metsulfuron)", key="plist_partial")
+    with f3:
+        st.button("✖ Clear", on_click=clear_search, key="plist_clear", help="Clear the filter and the chemical, "
+                  "concentration and formulation choices to start a new search.")
     matches = filter_names(all_names, query, partial)
     if query.strip():
         st.caption(f"{len(matches):,} of {len(all_names):,} chemicals match “{query.strip()}”.")
