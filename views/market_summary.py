@@ -8,7 +8,7 @@ from market import (
     render_concentration_index,
     render_movers_table,
 )
-from aggregate import render_product_aggregation, render_group_aggregation
+from aggregate import render_product_aggregation, render_group_aggregation, render_group_top_n
 
 df = load_master_import()
 reg_df = load_reg_no()
@@ -29,6 +29,9 @@ with tab_prod:
     render_product_aggregation(df)
 with tab_group:
     render_group_aggregation(df, load_classifications())
+    st.divider()
+    st.subheader("Top chemicals in the selected group(s) — latest year by default")
+    render_group_top_n(df, load_classifications())
 
 st.divider()
 
