@@ -592,6 +592,11 @@ def render_group_top_n(df, tables):
     bar.update_layout(height=max(280, 26 * len(top) + 120), margin=dict(t=10))
     bar.update_traces(textposition="outside", cliponaxis=False)
     st.plotly_chart(bar, width="stretch", key="gtn_bar")
+    st.markdown(f"**Trend of the top {len(top)} chemicals by year**")
+    chem_rows = union[union["chemical"].isin(top.index)]
+    _line_chart(_yearly_matrix(chem_rows.rename(columns={"chemical": "Chemical"}), "Chemical", metric, years, cumulative),
+                list(top.index), metric_name, cumulative, "gtn_top_trend")
+
     st.dataframe(
         top_df.style.format({c: fmt for c in top_df.columns if c.startswith(metric_name)} | {"Share of group (%)": "{:.1f}"}),
         hide_index=True,
@@ -600,8 +605,3 @@ def render_group_top_n(df, tables):
         "⬇️ Download top chemicals as CSV", top_df.to_csv(index=False).encode("utf-8-sig"),
         file_name="top_chemicals_in_group.csv", mime="text/csv", key="gtn_dl",
     )
-
-    st.markdown(f"**The top {len(top)} chemicals over time**")
-    chem_rows = union[union["chemical"].isin(top.index)]
-    _line_chart(_yearly_matrix(chem_rows.rename(columns={"chemical": "Chemical"}), "Chemical", metric, years, cumulative),
-                list(top.index), metric_name, cumulative, "gtn_top_trend")
