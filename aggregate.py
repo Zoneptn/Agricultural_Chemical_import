@@ -404,6 +404,7 @@ def render_group_aggregation(df, tables):
             "which counts each product once."
         )
 
+    cat = df[df["category"].isin(SYSTEM_CATEGORIES[system])]
     uncls = cat[~cat["common_name"].isin(set(mapping["common_name"]))]
     with st.expander(f"Not classified in {system} ({uncls['common_name'].nunique():,} names)"):
         if uncls.empty:
