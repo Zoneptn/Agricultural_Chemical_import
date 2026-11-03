@@ -1,6 +1,7 @@
 import streamlit as st
 
-from common import load_master_import, reload_all
+from aggregate import render_group_top_n
+from common import load_classifications, load_master_import, reload_all
 from cumulative import render_cumulative_trend, render_pareto
 
 df = load_master_import()
@@ -22,6 +23,11 @@ sel_names = st.multiselect(
     sorted(df["common_name"].unique()),
 )
 render_cumulative_trend(df, sel_names)
+
+st.divider()
+
+st.subheader("Mode-of-action group: trend and top chemicals")
+render_group_top_n(df, load_classifications())
 
 st.divider()
 
