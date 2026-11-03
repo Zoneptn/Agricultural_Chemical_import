@@ -256,6 +256,7 @@ def class_table(tables, system):
     group_col = "chemical_class" if system == "IRAC" else "chemical_group"
     out = pd.DataFrame({
         "_n": t["common_name"].map(_norm),
+        "name": t["common_name"].astype(str).str.lower().str.replace(r"\s+", " ", regex=True).str.strip(),
         "code": t["code"].map(_code),
         "group": t[group_col].fillna("").astype(str).str.strip(),
         "moa": t["mode_of_action"].map(_english),
@@ -304,6 +305,20 @@ def map_products(names, tables, system):
     return pd.concat(rows, ignore_index=True)
 
 
+def _coverage_caption(df, mapping, system):
+    """How much of the volume in the categories a system is meant for has a
+    code, so a reader knows what the lines leave out."""
+    cat = df[df["category"].isin(SYSTEM_CATEGORIES[system])]
+    covered = cat[cat["common_name"].isin(set(mapping["common_name"]))]
+    cat_qty = cat["quantity_kg"].sum()
+    if cat_qty:
+        st.caption(
+            f"{system} codes cover {covered['quantity_kg'].sum() / cat_qty:.1%} of "
+            f"{' / '.join(SYSTEM_CATEGORIES[system])} import volume (by quantity). The rest has no match in the "
+            f"{system} sheet by name."
+        )
+
+
 # Levels offered per system. Chemical group is only worth a level where codes really contain
 # several groups (HRAC: 14 of 28 codes); in IRAC each code has one class and in FRAC almost
 # always one, so it would just repeat Code. Main group exists only for IRAC (1A + 1B -> 1).
@@ -348,16 +363,7 @@ def render_group_aggregation(df, tables):
         mapping[["common_name", label_col, "match"]].drop_duplicates(), on="common_name", how="inner"
     )
 
-    # coverage against the categories this system is meant for
-    cat = df[df["category"].isin(SYSTEM_CATEGORIES[system])]
-    covered = cat[cat["common_name"].isin(set(mapping["common_name"]))]
-    cat_qty = cat["quantity_kg"].sum()
-    if cat_qty:
-        st.caption(
-            f"{system} codes cover {covered['quantity_kg'].sum() / cat_qty:.1%} of "
-            f"{' / '.join(SYSTEM_CATEGORIES[system])} import volume (by quantity). The rest has no match in the "
-            f"{system} sheet by name."
-        )
+    _coverage_caption(df, mapping, system)
     if rows.empty:
         st.info(f"No imports matched to {system} codes.")
         return
@@ -417,3 +423,184 @@ def render_group_aggregation(df, tables):
         else:
             st.dataframe(partial, hide_index=True)
             st.caption("Salt / ester names matched to the parent chemical in the sheet by their starting letters.")
+
+
+# ---------------------------------------------------------------------------
+# 3. Group trend + top N chemicals (Cumulative Analysis page)
+# ---------------------------------------------------------------------------
+TOPN_METRICS = {k: v for k, v in METRICS.items() if v != "price"}
+ALL_YEARS = "All years"
+
+
+def _yearly_matrix(rows, group_col, metric, years, cumulative):
+    """group x year matrix of the metric, every year present (0 when none), optionally running totals."""
+    m = rows.groupby([group_col, "year"])[metric].sum().unstack("year").reindex(columns=years).fillna(0.0)
+    return m.cumsum(axis=1) if cumulative else m
+
+
+def _line_chart(matrix, order, metric_name, cumulative, key):
+    long = matrix.reset_index().melt(id_vars=matrix.index.name, var_name="year", value_name="value")
+    fig = px.line(
+        long, x="year", y="value", color=matrix.index.name, markers=True, category_orders={matrix.index.name: order},
+        labels={"value": ("Cumulative " if cumulative else "") + metric_name, "year": "Year", matrix.index.name: ""},
+    )
+    fig.update_layout(legend=dict(orientation="h", y=-0.25), margin=dict(t=10))
+    fig.update_xaxes(dtick=1)
+    st.plotly_chart(fig, width="stretch", key=key)
+
+
+def render_group_top_n(df, tables):
+    """Pick IRAC / HRAC / FRAC code(s) — one, or several such as 4 and 5 —
+    then see the group's trend by year and the top N chemicals in it (ranked
+    for the last year, any chosen year, or all years), each with a graph."""
+    st.caption(
+        "Pick a mode-of-action code, or several (for example 4 and 5), to see how its imports develop and "
+        "which chemicals are the top N in it."
+    )
+    c1, c2, c3 = st.columns([2, 3, 2])
+    with c1:
+        system = st.radio("System", list(SYSTEM_CATEGORIES), key="gtn_system", horizontal=True,
+                          help=", ".join(f"{k}: {v}" for k, v in SYSTEM_BLURB.items()))
+    levels = SYSTEM_LEVELS[system]
+    with c2:
+        if len(levels) > 1:
+            level_name = st.radio("Level", list(levels), key=f"gtn_level_{system}", horizontal=True)
+        else:
+            level_name = next(iter(levels))
+            st.caption("Level: code")
+    with c3:
+        metric_name = st.selectbox("Measure", list(TOPN_METRICS), key="gtn_metric")
+    metric = TOPN_METRICS[metric_name]
+    label_col = levels[level_name]
+
+    o1, o2 = st.columns(2)
+    with o1:
+        include_mixtures = st.checkbox(
+            "Include mixtures (a product counts under the code of every ingredient it contains)",
+            value=True, key="gtn_mixtures",
+        )
+    with o2:
+        merge = st.checkbox(
+            "Merge salt / ester names under the parent chemical (e.g. every glyphosate salt → glyphosate)",
+            value=True, key="gtn_merge",
+        )
+
+    names = tuple(sorted(df["common_name"].unique()))
+    mapping = map_products(names, tuple(sorted(tables.items())), system)
+    if not include_mixtures:
+        mapping = mapping[mapping["n_components"] == 1]
+    _coverage_caption(df, mapping, system)
+
+    rows = df.reset_index().rename(columns={"index": "_row"}).merge(
+        mapping[["common_name", label_col, "n_components", "name"]].drop_duplicates(["common_name", label_col]),
+        on="common_name", how="inner",
+    )
+    if rows.empty:
+        st.info(f"No imports matched to {system} codes.")
+        return
+    rows["chemical"] = rows["common_name"].str.lower().str.replace(r"\s+", " ", regex=True).str.strip()
+    if merge:
+        single = rows["n_components"] == 1
+        rows.loc[single, "chemical"] = rows.loc[single, "name"]
+
+    code_order = sorted(rows[label_col].unique(), key=natural_key)
+    codes_key = f"gtn_codes_{system}_{label_col}"
+    if codes_key in st.session_state:  # drop picks that no longer exist (e.g. after toggling mixtures)
+        st.session_state[codes_key] = [c for c in st.session_state[codes_key] if c in set(code_order)]
+    picks = st.multiselect(
+        f"{system} codes", code_order, key=codes_key,
+        help="Listed in code order (1, 1A, 1B, 2 … 10, 11; letter codes last). Typing searches the list.",
+    )
+    if not picks:
+        st.info(f"Pick one or more {system} codes above — for example two codes to look at them together.")
+        return
+
+    years = sorted(int(y) for y in df["year"].unique())
+    sel = rows[rows[label_col].isin(picks)]
+    union = sel.drop_duplicates("_row")  # a shipment in two picked codes counts once
+
+    t1, t2 = st.columns([2, 3])
+    with t1:
+        cumulative = st.radio("Graphs show", ["Cumulative", "Per year"], key="gtn_cum", horizontal=True) == "Cumulative"
+    with t2:
+        if len(picks) > 1:
+            show = st.radio("Codes", ["Each separately", "Combined into one group"], key="gtn_show", horizontal=True)
+        else:
+            show = "Each separately"
+
+    # ---- headline numbers ----
+    last = years[-1]
+    total_all = union[metric].sum()
+    last_total = union.loc[union["year"] == last, metric].sum()
+    fmt = "{:,.0f}"
+    m1, m2, m3 = st.columns(3)
+    m1.metric(f"{metric_name}, all years", fmt.format(total_all))
+    m2.metric(f"{metric_name}, {last}", fmt.format(last_total))
+    m3.metric("Chemicals in the selection", f"{union['chemical'].nunique():,}")
+
+    # ---- trend of the selected group(s) ----
+    st.markdown("**Trend of the selected " + ("code" if len(picks) == 1 else "codes") + "**")
+    if show == "Each separately":
+        grp = sel.assign(_group=sel[label_col])
+        order = sorted(picks, key=natural_key)
+    else:
+        name = f"Combined: {len(picks)} codes"
+        grp = union.assign(_group=name)
+        order = [name]
+    grp = grp.rename(columns={"_group": "Code group"})
+    _line_chart(_yearly_matrix(grp, "Code group", metric, years, cumulative), order, metric_name, cumulative, "gtn_trend")
+    if show == "Each separately" and len(picks) > 1:
+        st.caption("A mixture belongs to several codes, so separate lines can add up to more than the combined group.")
+
+    # ---- top N chemicals ----
+    st.markdown("**Top chemicals in the selection**")
+    r1, r2 = st.columns([2, 3])
+    with r1:
+        rank_options = [str(y) for y in reversed(years)] + [ALL_YEARS]
+        rank_choice = st.selectbox("Rank by", rank_options, key="gtn_rank_year",
+                                   help="The latest year is the default. “All years” ranks by the full-period total.")
+    with r2:
+        top_n = st.slider("Top N chemicals", 3, 30, 10, key="gtn_n")
+    base = union if rank_choice == ALL_YEARS else union[union["year"] == int(rank_choice)]
+    by_chem = base.groupby("chemical")[metric].sum().sort_values(ascending=False)
+    by_chem = by_chem[by_chem > 0]
+    if by_chem.empty:
+        st.info(f"No {metric_name.lower()} recorded for this selection in {rank_choice}."
+                + (" (Value is not recorded for 2024 and 2025.)" if metric == "value_bht" else ""))
+        return
+    top = by_chem.head(top_n)
+    group_total = by_chem.sum()
+    all_years_total = union.groupby("chemical")[metric].sum()
+
+    label = rank_choice if rank_choice != ALL_YEARS else "all years"
+    top_df = pd.DataFrame({
+        "Rank": range(1, len(top) + 1), "Chemical": top.index,
+        f"{metric_name}, {label}": top.values,
+        "Share of group (%)": (top.values / group_total * 100).round(1),
+        f"{metric_name}, all years": all_years_total.reindex(top.index).values,
+    })
+    st.caption(
+        f"Top {len(top)} of {len(by_chem):,} chemicals ranked by {metric_name.lower()} in {label}; together "
+        f"{top.sum() / group_total:.1%} of the group's {label} total."
+    )
+    bar = px.bar(
+        top_df.iloc[::-1], x=f"{metric_name}, {label}", y="Chemical", orientation="h",
+        text=top_df.iloc[::-1]["Share of group (%)"].map(lambda v: f"{v:.1f}%"),
+        labels={f"{metric_name}, {label}": f"{metric_name}, {label}", "Chemical": ""},
+    )
+    bar.update_layout(height=max(280, 26 * len(top) + 120), margin=dict(t=10))
+    bar.update_traces(textposition="outside", cliponaxis=False)
+    st.plotly_chart(bar, width="stretch", key="gtn_bar")
+    st.dataframe(
+        top_df.style.format({c: fmt for c in top_df.columns if c.startswith(metric_name)} | {"Share of group (%)": "{:.1f}"}),
+        hide_index=True,
+    )
+    st.download_button(
+        "⬇️ Download top chemicals as CSV", top_df.to_csv(index=False).encode("utf-8-sig"),
+        file_name="top_chemicals_in_group.csv", mime="text/csv", key="gtn_dl",
+    )
+
+    st.markdown(f"**The top {len(top)} chemicals over time**")
+    chem_rows = union[union["chemical"].isin(top.index)]
+    _line_chart(_yearly_matrix(chem_rows.rename(columns={"chemical": "Chemical"}), "Chemical", metric, years, cumulative),
+                list(top.index), metric_name, cumulative, "gtn_top_trend")
