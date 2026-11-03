@@ -450,6 +450,17 @@ def _line_chart(matrix, order, metric_name, cumulative, key):
     st.plotly_chart(fig, width="stretch", key=key)
 
 
+def _two_charts(rows, group_col, metric, years, order, metric_name, key):
+    """Per-year and cumulative line graphs side by side."""
+    left, right = st.columns(2)
+    with left:
+        st.caption(f"Per year — {metric_name}")
+        _line_chart(_yearly_matrix(rows, group_col, metric, years, False), order, metric_name, False, key + "_year")
+    with right:
+        st.caption(f"Cumulative — {metric_name}")
+        _line_chart(_yearly_matrix(rows, group_col, metric, years, True), order, metric_name, True, key + "_cum")
+
+
 def render_group_top_n(df, tables):
     """Pick IRAC / HRAC / FRAC code(s) — one, or several such as 4 and 5 —
     then see the group's trend by year and the top N chemicals in it (ranked
@@ -520,14 +531,10 @@ def render_group_top_n(df, tables):
     sel = rows[rows[label_col].isin(picks)]
     union = sel.drop_duplicates("_row")  # a shipment in two picked codes counts once
 
-    t1, t2 = st.columns([2, 3])
-    with t1:
-        cumulative = st.radio("Graphs show", ["Cumulative", "Per year"], key="gtn_cum", horizontal=True) == "Cumulative"
-    with t2:
-        if len(picks) > 1:
-            show = st.radio("Codes", ["Each separately", "Combined into one group"], key="gtn_show", horizontal=True)
-        else:
-            show = "Each separately"
+    if len(picks) > 1:
+        show = st.radio("Codes", ["Each separately", "Combined into one group"], key="gtn_show", horizontal=True)
+    else:
+        show = "Each separately"
 
     # ---- headline numbers ----
     last = years[-1]
@@ -549,7 +556,7 @@ def render_group_top_n(df, tables):
         grp = union.assign(_group=name)
         order = [name]
     grp = grp.rename(columns={"_group": "Code group"})
-    _line_chart(_yearly_matrix(grp, "Code group", metric, years, cumulative), order, metric_name, cumulative, "gtn_trend")
+    _two_charts(grp, "Code group", metric, years, order, metric_name, "gtn_trend")
     if show == "Each separately" and len(picks) > 1:
         st.caption("A mixture belongs to several codes, so separate lines can add up to more than the combined group.")
 
@@ -594,8 +601,8 @@ def render_group_top_n(df, tables):
     st.plotly_chart(bar, width="stretch", key="gtn_bar")
     st.markdown(f"**Trend of the top {len(top)} chemicals by year**")
     chem_rows = union[union["chemical"].isin(top.index)]
-    _line_chart(_yearly_matrix(chem_rows.rename(columns={"chemical": "Chemical"}), "Chemical", metric, years, cumulative),
-                list(top.index), metric_name, cumulative, "gtn_top_trend")
+    _two_charts(chem_rows.rename(columns={"chemical": "Chemical"}), "Chemical", metric, years,
+                list(top.index), metric_name, "gtn_top_trend")
 
     st.dataframe(
         top_df.style.format({c: fmt for c in top_df.columns if c.startswith(metric_name)} | {"Share of group (%)": "{:.1f}"}),
